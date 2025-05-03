@@ -137,10 +137,10 @@ class VSLBase(nn.Module):
             start_logits=start_logits, end_logits=end_logits
         )
 
-    def compute_highlight_loss(self, scores, labels, mask):
-        return self.highlight_layer.compute_loss(
-            scores=scores, labels=labels, mask=mask
-        )
+    # def compute_highlight_loss(self, scores, labels, mask):
+    #     return self.highlight_layer.compute_loss(
+    #         scores=scores, labels=labels, mask=mask
+    #     )
 
     def compute_loss(self, start_logits, end_logits, start_labels, end_labels):
         return self.predictor.compute_cross_entropy_loss(
