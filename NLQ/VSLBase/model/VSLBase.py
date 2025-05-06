@@ -68,7 +68,7 @@ class VSLBase(nn.Module):
         )
         # video and query fusion
         self.cq_attention = CQAttention(dim=configs.dim, drop_rate=configs.drop_rate)
-        self.cq_concat = CQConcatenate(dim=configs.dim)
+        # self.cq_concat = CQConcatenate(dim=configs.dim)
         # query-guided highlighting
         # self.highlight_layer = HighLightLayer(dim=configs.dim)
         # conditioned predictor
