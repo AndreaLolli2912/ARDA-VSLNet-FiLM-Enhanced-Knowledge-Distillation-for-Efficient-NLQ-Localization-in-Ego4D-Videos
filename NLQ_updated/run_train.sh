@@ -1,6 +1,7 @@
 # To train the model.
 CUDA_VISIBLE_DEVICES=1 python main.py \
     --task nlq_official_v1 \
+    --model_name vslnet \
     --predictor bert \
     --mode train \
     --video_feature_dim 2304 \
@@ -15,6 +16,7 @@ CUDA_VISIBLE_DEVICES=1 python main.py \
 # To predict on test set.
 # CUDA_VISIBLE_DEVICES=1 python main.py \
 #     --task nlq_official_v1 \
+#     --model_name
 #     --predictor bert \
 #     --mode test \
 #     --video_feature_dim 2304 \

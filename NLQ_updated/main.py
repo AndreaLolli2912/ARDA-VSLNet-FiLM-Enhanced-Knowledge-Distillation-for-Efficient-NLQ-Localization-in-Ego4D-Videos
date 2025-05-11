@@ -10,6 +10,7 @@ import torch.nn as nn
 import submitit
 from torch.utils.tensorboard.writer import SummaryWriter
 from model.VSLNet import build_optimizer_and_scheduler, VSLNet
+from model.VSLBase import VSLBase
 from tqdm import tqdm
 from utils.data_gen import gen_or_load_dataset
 from utils.data_loader import get_test_loader, get_train_loader
@@ -98,9 +99,16 @@ def main(configs, parser):
             save_pretty=True,
         )
         # build model
-        model = VSLNet(
-            configs=configs, word_vectors=dataset.get("word_vector", None)
-        ).to(device)
+        if configs.model_name == "vslnet":
+            model = VSLNet(
+                configs=configs, word_vectors=dataset.get("word_vector", None)
+            ).to(device)
+        
+        elif configs.model_name == "vslbase":
+            model = VSLBase(
+                configs=configs, word_vectors=dataset.get("word_vector", None)
+            ).to(device)
+
         optimizer, scheduler = build_optimizer_and_scheduler(model, configs=configs)
         # start training
         best_metric = -1.0
@@ -157,14 +165,20 @@ def main(configs, parser):
                 h_score, start_logits, end_logits = model(
                     word_ids, char_ids, vfeats, video_mask, query_mask
                 )
+
                 # compute loss
-                highlight_loss = model.compute_highlight_loss(
-                    h_score, h_labels, video_mask
-                )
                 loc_loss = model.compute_loss(
                     start_logits, end_logits, s_labels, e_labels
                 )
-                total_loss = loc_loss + configs.highlight_lambda * highlight_loss
+
+                if configs.model_name == "vslnet":
+                    highlight_loss = model.compute_highlight_loss(
+                    h_score, h_labels, video_mask
+                    )
+                    total_loss = loc_loss + configs.highlight_lambda * highlight_loss
+                else:
+                    totoal_loss = loc_loss
+                
                 # compute and apply gradients
                 optimizer.zero_grad()
                 total_loss.backward()
@@ -236,9 +250,15 @@ def main(configs, parser):
         parser.set_defaults(**pre_configs)
         configs = parser.parse_args()
         # build model
-        model = VSLNet(
-            configs=configs, word_vectors=dataset.get("word_vector", None)
-        ).to(device)
+        if configs.model_name == "vslnet":
+            model = VSLNet(
+                configs=configs, word_vectors=dataset.get("word_vector", None)
+            ).to(device)
+        
+        elif configs.model_name == "vslbase":
+            model = VSLBase(
+                configs=configs, word_vectors=dataset.get("word_vector", None)
+            ).to(device)
 
         # get last checkpoint file
         filename = get_last_checkpoint(model_dir, suffix="t7")

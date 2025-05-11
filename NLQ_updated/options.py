@@ -121,7 +121,7 @@ def read_command_line():
         default="checkpoints",
         help="path to save trained model weights",
     )
-    parser.add_argument("--model_name", type=str, default="vslbase", help="model name")  # noqa
+    parser.add_argument("--model_name", type=str, default="vslnet", help="[vslnet | vslbase] model name")  # noqa
     parser.add_argument(
         "--suffix",
         type=str,
