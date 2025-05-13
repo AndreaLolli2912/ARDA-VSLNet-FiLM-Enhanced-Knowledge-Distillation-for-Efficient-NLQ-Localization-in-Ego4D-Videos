@@ -96,6 +96,10 @@ class EpisodicNLQProcessor:
 
 
 def load_glove(glove_path):
+
+    # MAYBE HERE
+    #http://nlp.stanford.edu/data/glove.840B.300d.zip
+
     vocab = list()
     with codecs.open(glove_path, mode="r", encoding="utf-8") as f:
         for line in tqdm(f, total=2196018, desc="load glove vocabulary"):
@@ -314,7 +318,20 @@ def gen_or_load_dataset(configs):
         return dataset
     print("Generating data for dataloader", flush=True)
     feat_len_path = os.path.join(feature_dir, "feature_shapes.json")
+    
+    ######
+    # In questa parte si definisce la directory dy glove
+    # Questo implica che la directory esiste
+    # E se non esiste?
+    # 1) Tramite configs, possiamo chiedere per la directory
+    # 2) Se invece la directory non è data, dobbiamo crearla noi
+    #   2.1) Crea directory
+    #   2.2) Scarica glove
+
     emb_path = os.path.join("data", "features", "glove.840B.300d.txt")
+    
+    ######
+    
     # load video feature length
     vfeat_lens = load_json(feat_len_path)
     for vid, vfeat_len in vfeat_lens.items():
