@@ -9,17 +9,10 @@ import torch
 import torch.nn as nn
 import submitit
 from torch.utils.tensorboard.writer import SummaryWriter
-
 import nltk
-
-nltk.download('punkt_tab')
-nltk.download('punkt')
-nltk.download('wordnet')
-nltk.download('omw-1.4')
 
 from model.VSLNet import build_optimizer_and_scheduler, VSLNet
 from model.VSLBase import VSLBase
-
 from utils.data_gen import gen_or_load_dataset
 from utils.data_loader import get_test_loader, get_train_loader
 from utils.data_util import load_json, load_video_features, save_json
@@ -297,6 +290,12 @@ def create_executor(configs):
 
 
 if __name__ == "__main__":
+
+    nltk.download('punkt_tab')
+    nltk.download('punkt')
+    nltk.download('wordnet')
+    nltk.download('omw-1.4')
+
     configs, parser = options.read_command_line()
     if not configs.slurm:
         main(configs, parser)
