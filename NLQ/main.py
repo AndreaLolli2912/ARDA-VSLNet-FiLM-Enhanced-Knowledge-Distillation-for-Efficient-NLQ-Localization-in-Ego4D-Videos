@@ -2,16 +2,24 @@
 """
 import argparse
 import os
-
+from tqdm import tqdm
 import numpy as np
 import options
 import torch
 import torch.nn as nn
 import submitit
 from torch.utils.tensorboard.writer import SummaryWriter
+
+import nltk
+
+nltk.download('punkt_tab')
+nltk.download('punkt')
+nltk.download('wordnet')
+nltk.download('omw-1.4')
+
 from model.VSLNet import build_optimizer_and_scheduler, VSLNet
 from model.VSLBase import VSLBase
-from tqdm import tqdm
+
 from utils.data_gen import gen_or_load_dataset
 from utils.data_loader import get_test_loader, get_train_loader
 from utils.data_util import load_json, load_video_features, save_json
