@@ -167,9 +167,14 @@ def main(configs, parser):
                 # generate mask
                 video_mask = convert_length_to_mask(vfeat_lens).to(device)
                 # compute logits
-                h_score, start_logits, end_logits = model(
-                    word_ids, char_ids, vfeats, video_mask, query_mask
-                )
+                if configs.model_name == "vslnet":
+                    h_score, start_logits, end_logits = model(
+                        word_ids, char_ids, vfeats, video_mask, query_mask
+                    )
+                elif configs.model_name == "vslbase":
+                    start_logits, end_logits = model(
+                        word_ids, char_ids, vfeats, video_mask, query_mask
+                    )
 
                 # compute loss
                 loc_loss = model.compute_loss(
@@ -181,7 +186,7 @@ def main(configs, parser):
                     h_score, h_labels, video_mask
                     )
                     total_loss = loc_loss + configs.highlight_lambda * highlight_loss
-                else:
+                elif configs.model_name == "vslbase":
                     total_loss = loc_loss
                 
                 # compute and apply gradients
