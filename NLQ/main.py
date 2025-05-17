@@ -101,11 +101,13 @@ def main(configs, parser):
         )
         # build model
         if configs.model_name == "vslnet":
+            print(f"{configs.model_name=}")
             model = VSLNet(
                 configs=configs, word_vectors=dataset.get("word_vector", None)
             ).to(device)
         
         elif configs.model_name == "vslbase":
+            print(f"{configs.model_name=}")
             model = VSLBase(
                 configs=configs, word_vectors=dataset.get("word_vector", None)
             ).to(device)
@@ -144,6 +146,7 @@ def main(configs, parser):
                     h_labels.to(device),
                 )
                 if configs.predictor == "bert":
+                    print(f"{configs.predictor=}")
                     word_ids = {key: val.to(device) for key, val in word_ids.items()}
                     # generate mask
                     query_mask = (
@@ -155,6 +158,7 @@ def main(configs, parser):
                         .to(device)
                     )
                 else:
+                    print(f"{configs.predictor=}")
                     word_ids, char_ids = word_ids.to(device), char_ids.to(device)
                     # generate mask
                     query_mask = (
@@ -178,7 +182,7 @@ def main(configs, parser):
                     )
                     total_loss = loc_loss + configs.highlight_lambda * highlight_loss
                 else:
-                    totoal_loss = loc_loss
+                    total_loss = loc_loss
                 
                 # compute and apply gradients
                 optimizer.zero_grad()
@@ -188,12 +192,18 @@ def main(configs, parser):
                 )  # clip gradient
                 optimizer.step()
                 scheduler.step()
-                if writer is not None and global_step % configs.tb_log_freq == 0:
-                    writer.add_scalar("Loss/Total", total_loss.detach().cpu(), global_step)
-                    writer.add_scalar("Loss/Loc", loc_loss.detach().cpu(), global_step)
-                    writer.add_scalar("Loss/Highlight", highlight_loss.detach().cpu(), global_step)
-                    writer.add_scalar("Loss/Highlight (*lambda)", (configs.highlight_lambda * highlight_loss.detach().cpu()), global_step)
-                    writer.add_scalar("LR", optimizer.param_groups[0]["lr"], global_step)
+                if configs.model_name == "vslnet":
+                    if writer is not None and global_step % configs.tb_log_freq == 0:
+                        writer.add_scalar("Loss/Total", total_loss.detach().cpu(), global_step)
+                        writer.add_scalar("Loss/Loc", loc_loss.detach().cpu(), global_step)
+                        writer.add_scalar("Loss/Highlight", highlight_loss.detach().cpu(), global_step)
+                        writer.add_scalar("Loss/Highlight (*lambda)", (configs.highlight_lambda * highlight_loss.detach().cpu()), global_step)
+                        writer.add_scalar("LR", optimizer.param_groups[0]["lr"], global_step)
+                elif configs.model_name == "vslbase":
+                    if writer is not None and global_step % configs.tb_log_freq == 0:
+                        writer.add_scalar("Loss/Total", total_loss.detach().cpu(), global_step)
+                        writer.add_scalar("Loss/Loc", loc_loss.detach().cpu(), global_step)
+                        writer.add_scalar("LR", optimizer.param_groups[0]["lr"], global_step)
 
                 # evaluate
                 if (
@@ -252,11 +262,13 @@ def main(configs, parser):
         configs = parser.parse_args()
         # build model
         if configs.model_name == "vslnet":
+            print(f"{configs.model_name=}")
             model = VSLNet(
                 configs=configs, word_vectors=dataset.get("word_vector", None)
             ).to(device)
         
         elif configs.model_name == "vslbase":
+            print(f"{configs.model_name=}")
             model = VSLBase(
                 configs=configs, word_vectors=dataset.get("word_vector", None)
             ).to(device)
