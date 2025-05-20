@@ -68,6 +68,7 @@ def eval_test(
     gt_json_path=None,
     epoch=None,
     global_step=None,
+    model_name = "vslnet"
 ):
     predictions = []
     with torch.no_grad():
@@ -95,9 +96,14 @@ def eval_test(
             # generate mask
             video_mask = convert_length_to_mask(vfeat_lens).to(device)
             # compute predicted results
-            _, start_logits, end_logits = model(
-                word_ids, char_ids, vfeats, video_mask, query_mask
-            )
+            if model_name == "vslnet":
+                _, start_logits, end_logits = model(
+                    word_ids, char_ids, vfeats, video_mask, query_mask
+                )
+            else:
+                start_logits, end_logits = model(
+                    word_ids, char_ids, vfeats, video_mask, query_mask
+                )
             start_indices, end_indices = model.extract_index(start_logits, end_logits)
             start_indices = start_indices.cpu().numpy()
             end_indices = end_indices.cpu().numpy()

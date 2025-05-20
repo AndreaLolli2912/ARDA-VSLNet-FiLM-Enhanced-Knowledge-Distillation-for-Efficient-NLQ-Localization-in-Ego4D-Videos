@@ -233,6 +233,7 @@ def main(configs, parser):
                         global_step=global_step,
                         gt_json_path=configs.eval_gt_json,
                         result_save_path=result_save_path,
+                        model_name=configs.model_name,
                     )
                     print(score_str, flush=True)
                     if writer is not None:
@@ -289,6 +290,7 @@ def main(configs, parser):
             device=device,
             mode="test",
             result_save_path=result_save_path,
+            model_name=configs.model_name,
         )
         print(score_str, flush=True)
 
