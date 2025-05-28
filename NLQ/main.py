@@ -101,13 +101,13 @@ def main(configs, parser):
         )
         # build model
         if configs.model_name == "vslnet":
-            print(f"{configs.model_name=}")
+            # print(f"{configs.model_name=}")
             model = VSLNet(
                 configs=configs, word_vectors=dataset.get("word_vector", None)
             ).to(device)
         
         elif configs.model_name == "vslbase":
-            print(f"{configs.model_name=}")
+            # print(f"{configs.model_name=}")
             model = VSLBase(
                 configs=configs, word_vectors=dataset.get("word_vector", None)
             ).to(device)
@@ -146,7 +146,7 @@ def main(configs, parser):
                     h_labels.to(device),
                 )
                 if configs.predictor == "bert":
-                    print(f"{configs.predictor=}")
+                    # print(f"{configs.predictor=}")
                     word_ids = {key: val.to(device) for key, val in word_ids.items()}
                     # generate mask
                     query_mask = (
@@ -158,7 +158,7 @@ def main(configs, parser):
                         .to(device)
                     )
                 else:
-                    print(f"{configs.predictor=}")
+                    # print(f"{configs.predictor=}")
                     word_ids, char_ids = word_ids.to(device), char_ids.to(device)
                     # generate mask
                     query_mask = (
@@ -268,13 +268,13 @@ def main(configs, parser):
         configs = parser.parse_args()
         # build model
         if configs.model_name == "vslnet":
-            print(f"{configs.model_name=}")
+            # print(f"{configs.model_name=}")
             model = VSLNet(
                 configs=configs, word_vectors=dataset.get("word_vector", None)
             ).to(device)
         
         elif configs.model_name == "vslbase":
-            print(f"{configs.model_name=}")
+            # print(f"{configs.model_name=}")
             model = VSLBase(
                 configs=configs, word_vectors=dataset.get("word_vector", None)
             ).to(device)
