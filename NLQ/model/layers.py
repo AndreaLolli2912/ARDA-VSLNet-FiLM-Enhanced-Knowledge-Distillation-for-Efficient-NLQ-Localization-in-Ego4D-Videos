@@ -568,3 +568,18 @@ class ConditionedPredictor(nn.Module):
         start_loss = nn.CrossEntropyLoss(reduction="mean")(start_logits, start_labels)
         end_loss = nn.CrossEntropyLoss(reduction="mean")(end_logits, end_labels)
         return start_loss + end_loss
+
+class FiLM(nn.Module):
+    def __init__(self, input_dim, num_channels):
+        super(FiLM, self).__init__()
+        self.gamma_layer = nn.Linear(input_dim, num_channels)
+        self.beta_layer = nn.Linear(input_dim, num_channels)
+
+    def forward(self, visual_feat, conditioning_feat):
+        """
+        visual_feat: [B, T, C]  (video features)
+        conditioning_feat: [B, C] (global query embedding)
+        """
+        gamma = self.gamma_layer(conditioning_feat).unsqueeze(1)  # [B, 1, C]
+        beta = self.beta_layer(conditioning_feat).unsqueeze(1)    # [B, 1, C]
+        return gamma * visual_feat + beta
