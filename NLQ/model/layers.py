@@ -332,7 +332,7 @@ class FeatureEncoder(nn.Module):
         # Aggiungi FiLM
         self.film_layer = FiLM(input_dim=dim, num_channels=dim)
 
-def forward(self, x, mask=None, cond=None):
+    def forward(self, x, mask=None, cond=None):
 
         features = x + self.pos_embedding(x)  # (batch_size, seq_len, dim)
         features = self.conv_block(features)  # (batch_size, seq_len, dim)
