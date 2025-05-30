@@ -329,6 +329,8 @@ class FeatureEncoder(nn.Module):
         self.attention_block = MultiHeadAttentionBlock(
             dim=dim, num_heads=num_heads, drop_rate=drop_rate
         )
+        # Aggiungi FiLM
+        self.film_layer = FiLM(input_dim=dim, num_channels=dim)
 
     def forward(self, x, mask=None):
         features = x + self.pos_embedding(x)  # (batch_size, seq_len, dim)

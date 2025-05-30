@@ -68,8 +68,6 @@ class DeepVSLNet(nn.Module):
             drop_rate=configs.drop_rate,
         )
         
-        self.film_layer = FiLM(input_dim=configs.dim, num_channels=configs.dim)
-        
         # video and query fusion
         self.cq_attention = CQAttention(dim=configs.dim, drop_rate=configs.drop_rate)
         self.cq_concat = CQConcatenate(dim=configs.dim)
@@ -128,12 +126,12 @@ class DeepVSLNet(nn.Module):
             query_features = self.embedding_net(word_ids, char_ids)
 
         query_features = self.feature_encoder(query_features, mask=q_mask)
-        video_features = self.feature_encoder(video_features, mask=v_mask)
         # Estrai un vettore globale di query (media pooling)
         q_mask_exp = q_mask.unsqueeze(2).float()  # [B, L_q, 1]
         q_embed = (query_features * q_mask_exp).sum(dim=1) / q_mask_exp.sum(dim=1)
-        # Applica FiLM sui feature video
-        video_features = self.film_layer(video_features, q_embed)
+
+        video_features = self.feature_encoder(video_features, mask=v_mask, cond=q_embed)
+ 
         features = self.cq_attention(video_features, query_features, v_mask, q_mask)
         features = self.cq_concat(features, query_features, q_mask)
         h_score = self.highlight_layer(features, v_mask)
