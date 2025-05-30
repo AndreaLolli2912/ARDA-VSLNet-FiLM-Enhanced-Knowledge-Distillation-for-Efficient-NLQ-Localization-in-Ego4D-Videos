@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from transformers import get_linear_schedule_with_warmup
 
-from model.layers import (
+from model.light_layers import (
     Embedding,
     VisualProjection,
     FeatureEncoder,
@@ -50,9 +50,9 @@ def build_optimizer_and_scheduler(model, configs):
     return optimizer, scheduler
 
 
-class DeepVSLNet(nn.Module):
+class LightVSLNet(nn.Module):
     def __init__(self, configs, word_vectors):
-        super(DeepVSLNet, self).__init__()
+        super(LightVSLNet, self).__init__()
         self.configs = configs
         self.video_affine = VisualProjection(
             visual_dim=configs.video_feature_dim,
@@ -119,8 +119,11 @@ class DeepVSLNet(nn.Module):
 
     def forward(self, word_ids, char_ids, video_features, v_mask, q_mask):
         video_features = self.video_affine(video_features)
-        query_features = self.embedding_net(word_ids)
-        query_features = self.query_affine(query_features)
+        if self.configs.predictor == "bert":
+            query_features = self.embedding_net(word_ids)
+            query_features = self.query_affine(query_features)
+        else:
+            query_features = self.embedding_net(word_ids, char_ids)
 
         query_features = self.feature_encoder(query_features, mask=q_mask)
         # Estrai un vettore globale di query (media pooling)
