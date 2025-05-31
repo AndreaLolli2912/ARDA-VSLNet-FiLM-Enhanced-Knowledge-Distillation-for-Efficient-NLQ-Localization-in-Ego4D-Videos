@@ -126,7 +126,7 @@ class LightVSLNet(nn.Module):
             query_features = self.embedding_net(word_ids, char_ids)
 
         query_features = self.feature_encoder(query_features, mask=q_mask)
-        # Estrai un vettore globale di query (media pooling)
+        
         q_mask_exp = q_mask.unsqueeze(2).float()  # [B, L_q, 1]
         q_embed = (query_features * q_mask_exp).sum(dim=1) / q_mask_exp.sum(dim=1)
 

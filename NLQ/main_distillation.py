@@ -11,8 +11,8 @@ import submitit
 from torch.utils.tensorboard.writer import SummaryWriter
 import nltk
 
-from model.VSLNet import build_optimizer_and_scheduler, VSLNet
-from model.VSLBase import VSLBase
+from model.DeepVSLNet import build_optimizer_and_scheduler, DeepVSLNet
+from model.LightVSLNet import LightVSLNet
 from utils.data_gen import gen_or_load_dataset
 from utils.data_loader import get_test_loader, get_train_loader
 from utils.data_util import load_json, load_video_features, save_json
@@ -27,6 +27,10 @@ from utils.runner_utils import (
 
 def main(configs, parser):
     print(f"Running with {configs}", flush=True)
+
+    feature_map_weight = configs.feature_map_weight
+    ce_loss_weight = configs.ce_loss_weight
+    distill_weight_loss = configs.distill_weight_loss
 
     # set tensorflow configs
     set_th_config(configs.seed)
@@ -88,6 +92,7 @@ def main(configs, parser):
         print(f"Writing to tensorboard: {log_dir}")
         writer = SummaryWriter(log_dir=log_dir)
 
+    mse_loss = nn.MSELoss()
     # train and test
     if configs.mode.lower() == "train":
         if not os.path.exists(model_dir):
@@ -99,18 +104,13 @@ def main(configs, parser):
             sort_keys=True,
             save_pretty=True,
         )
-        # build model
-        if configs.model_name == "vslnet":
-            # print(f"{configs.model_name=}")
-            model = VSLNet(
-                configs=configs, word_vectors=dataset.get("word_vector", None)
-            ).to(device)
-        
-        elif configs.model_name == "vslbase":
-            # print(f"{configs.model_name=}")
-            model = VSLBase(
-                configs=configs, word_vectors=dataset.get("word_vector", None)
-            ).to(device)
+        teacher = DeepVSLNet(
+            configs=configs, word_vectors=dataset.get("word_vector", None)
+        ).to(device)
+
+        student = LightVSLNet(
+            configs=configs, word_vectors=dataset.get("word_vector", None)
+        ).to(device)
 
         optimizer, scheduler = build_optimizer_and_scheduler(model, configs=configs)
         # start training
@@ -120,8 +120,11 @@ def main(configs, parser):
         )
         print("start training...", flush=True)
         global_step = 0
+        filename = get_last_checkpoint(model_dir, suffix="t7")
+        teacher.load_state_dict(torch.load(filename))
         for epoch in range(configs.epochs):
-            model.train()
+            teacher.eval()
+            student.train()
             for data in tqdm(
                 train_loader,
                 total=num_train_batches,
@@ -167,55 +170,56 @@ def main(configs, parser):
                 # generate mask
                 video_mask = convert_length_to_mask(vfeat_lens).to(device)
                 # compute logits
-                if configs.model_name == "vslnet":
-                    h_score, start_logits, end_logits = model(
+                
+                with torch.no_grad():
+                    h_score_teacher, start_logits_teacher, end_logits_teacher = teacher(
                         word_ids, char_ids, vfeats, video_mask, query_mask
                     )
-                elif configs.model_name == "vslbase":
-                    start_logits, end_logits = model(
-                        word_ids, char_ids, vfeats, video_mask, query_mask
-                    )
-
-                # compute loss
-                loc_loss = model.compute_loss(
-                    start_logits, end_logits, s_labels, e_labels
+                
+                h_score_student, start_logits_student, end_logits_student = student(
+                    word_ids, char_ids, vfeats, video_mask, query_mask
                 )
 
-                if configs.model_name == "vslnet":
-                    highlight_loss = model.compute_highlight_loss(
-                    h_score, h_labels, video_mask
-                    )
-                    total_loss = loc_loss + configs.highlight_lambda * highlight_loss
-                elif configs.model_name == "vslbase":
-                    total_loss = loc_loss
+                # compute loss
+                loc_loss = student.compute_loss(
+                    start_logits_student, end_logits_student, s_labels, e_labels
+                )
+                
+                highlight_loss = student.compute_highlight_loss(
+                    h_score_student, h_labels, video_mask
+                )
+
+                teacher_start_loss = mse_loss(start_logits_student, start_logits_teacher)
+                teacher_end_loss = mse_loss(end_logits_student, end_logits_teacher)
+                teacher_loss = teacher_start_loss + teacher_end_loss
+
+                highlight_distill_loss = mse_loss(h_score_student, h_score_teacher)
+
+                total_loss = loc_loss + configs.highlight_lambda * highlight_loss + highlight_distill_loss*distill_weight_loss
+                total_loss = feature_map_weight*teacher_loss + ce_loss_weight*total_loss
                 
                 # compute and apply gradients
                 optimizer.zero_grad()
                 total_loss.backward()
                 nn.utils.clip_grad_norm_(
-                    model.parameters(), configs.clip_norm
+                    student.parameters(), configs.clip_norm
                 )  # clip gradient
                 optimizer.step()
                 scheduler.step()
-                if configs.model_name == "vslnet":
-                    if writer is not None and global_step % configs.tb_log_freq == 0:
-                        writer.add_scalar("Loss/Total", total_loss.detach().cpu(), global_step)
-                        writer.add_scalar("Loss/Loc", loc_loss.detach().cpu(), global_step)
-                        writer.add_scalar("Loss/Highlight", highlight_loss.detach().cpu(), global_step)
-                        writer.add_scalar("Loss/Highlight (*lambda)", (configs.highlight_lambda * highlight_loss.detach().cpu()), global_step)
-                        writer.add_scalar("LR", optimizer.param_groups[0]["lr"], global_step)
-                elif configs.model_name == "vslbase":
-                    if writer is not None and global_step % configs.tb_log_freq == 0:
-                        writer.add_scalar("Loss/Total", total_loss.detach().cpu(), global_step)
-                        writer.add_scalar("Loss/Loc", loc_loss.detach().cpu(), global_step)
-                        writer.add_scalar("LR", optimizer.param_groups[0]["lr"], global_step)
+                
+                if writer is not None and global_step % configs.tb_log_freq == 0:
+                    writer.add_scalar("Loss/Total", total_loss.detach().cpu(), global_step)
+                    writer.add_scalar("Loss/Loc", loc_loss.detach().cpu(), global_step)
+                    writer.add_scalar("Loss/Highlight", highlight_loss.detach().cpu(), global_step)
+                    writer.add_scalar("Loss/Highlight (*lambda)", (configs.highlight_lambda * highlight_loss.detach().cpu()), global_step)
+                    writer.add_scalar("LR", optimizer.param_groups[0]["lr"], global_step)
 
                 # evaluate
                 if (
                     global_step % eval_period == 0
                     or global_step % num_train_batches == 0
                 ):
-                    model.eval()
+                    student.eval()
                     print(
                         f"\nEpoch: {epoch + 1:2d} | Step: {global_step:5d}", flush=True
                     )
@@ -225,7 +229,7 @@ def main(configs, parser):
                     )
                     # Evaluate on val, keep the top 3 checkpoints.
                     results, mIoU, (score_str, score_dict) = eval_test(
-                        model=model,
+                        model=student,
                         data_loader=val_loader,
                         device=device,
                         mode="val",
@@ -247,7 +251,7 @@ def main(configs, parser):
                     if results[0][0] >= best_metric:
                         best_metric = results[0][0]
                         torch.save(
-                            model.state_dict(),
+                            student.state_dict(),
                             os.path.join(
                                 model_dir,
                                 "{}_{}.t7".format(configs.model_name, global_step),
@@ -255,7 +259,7 @@ def main(configs, parser):
                         )
                         # only keep the top-3 model checkpoints
                         filter_checkpoints(model_dir, suffix="t7", max_to_keep=3)
-                    model.train()
+                    student.train()
             
         score_writer.close()
 
