@@ -28,9 +28,10 @@ from utils.runner_utils import (
 def main(configs, parser):
     print(f"Running with {configs}", flush=True)
 
-    feature_map_weight = configs.feature_map_weight
-    ce_loss_weight = configs.ce_loss_weight
-    distill_weight_loss = configs.distill_weight_loss
+    # TODO metterli come hyperpar
+    feature_map_weight = 0.25
+    ce_loss_weight = 0.75
+    distill_weight_loss = 0.2
 
     # set tensorflow configs
     set_th_config(configs.seed)
@@ -112,7 +113,7 @@ def main(configs, parser):
             configs=configs, word_vectors=dataset.get("word_vector", None)
         ).to(device)
 
-        optimizer, scheduler = build_optimizer_and_scheduler(model, configs=configs)
+        optimizer, scheduler = build_optimizer_and_scheduler(student, configs=configs)
         # start training
         best_metric = -1.0
         score_writer = open(
@@ -120,7 +121,8 @@ def main(configs, parser):
         )
         print("start training...", flush=True)
         global_step = 0
-        filename = get_last_checkpoint(model_dir, suffix="t7")
+        model_dir_teacher = "/content/nlq_official_v1_deep/checkpoints/egovlp_fp16"
+        filename = get_last_checkpoint(model_dir_teacher, suffix="t7")
         teacher.load_state_dict(torch.load(filename))
         for epoch in range(configs.epochs):
             teacher.eval()
@@ -273,23 +275,23 @@ def main(configs, parser):
         # build model
         if configs.model_name == "vslnet":
             # print(f"{configs.model_name=}")
-            model = VSLNet(
+            student = VSLNet(
                 configs=configs, word_vectors=dataset.get("word_vector", None)
             ).to(device)
         
         elif configs.model_name == "vslbase":
             # print(f"{configs.model_name=}")
-            model = VSLBase(
+            student = VSLBase(
                 configs=configs, word_vectors=dataset.get("word_vector", None)
             ).to(device)
 
         # get last checkpoint file
         filename = get_last_checkpoint(model_dir, suffix="t7")
-        model.load_state_dict(torch.load(filename))
-        model.eval()
+        student.load_state_dict(torch.load(filename))
+        student.eval()
         result_save_path = filename.replace(".t7", "_test_result.json")
         results, mIoU, score_str = eval_test(
-            model=model,
+            model=student,
             data_loader=test_loader,
             device=device,
             mode="test",

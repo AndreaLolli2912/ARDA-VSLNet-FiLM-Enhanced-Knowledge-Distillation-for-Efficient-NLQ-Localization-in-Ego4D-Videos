@@ -10,10 +10,7 @@ CUDA_VISIBLE_DEVICES=1 python main.py \
     --fv official \
     --num_workers 64 \
     --model_dir checkpoints/ \
-    --eval_gt_json "data/nlq_val.json" \
-    --feature_map_weight 0.25 \
-    --ce_loss_weight 0.75 \
-    --distill_weight_loss 0.2
+    --eval_gt_json "data/nlq_val.json" 
 
 
 # To predict on test set.

@@ -317,7 +317,7 @@ class MultiHeadAttentionBlock(nn.Module):
 
 class FeatureEncoder(nn.Module):
     def __init__(
-        self, dim, num_heads, max_pos_len, kernel_size=7, num_layers=4, drop_rate=0.0
+        self, dim, num_heads, max_pos_len, kernel_size=7, num_layers=1, drop_rate=0.0
     ):
         super(FeatureEncoder, self).__init__()
         self.pos_embedding = PositionalEmbedding(

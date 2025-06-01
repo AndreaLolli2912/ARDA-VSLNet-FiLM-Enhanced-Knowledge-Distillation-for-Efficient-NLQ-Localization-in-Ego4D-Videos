@@ -49,7 +49,7 @@ def build_optimizer_and_scheduler(model, configs):
     )
     return optimizer, scheduler
 
-
+#modifiche: feature_encoder num_layers 4 -> 1
 class LightVSLNet(nn.Module):
     def __init__(self, configs, word_vectors):
         super(LightVSLNet, self).__init__()
@@ -63,7 +63,7 @@ class LightVSLNet(nn.Module):
             dim=configs.dim,
             num_heads=configs.num_heads,
             kernel_size=7,
-            num_layers=4,
+            num_layers=1,
             max_pos_len=configs.max_pos_len,
             drop_rate=configs.drop_rate,
         )
