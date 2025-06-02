@@ -56,12 +56,12 @@ class LightVSLNet(nn.Module):
         self.configs = configs
         self.video_affine = VisualProjection(
             visual_dim=configs.video_feature_dim,
-            dim=configs.dim,
+            dim=configs.dim_student,
             drop_rate=configs.drop_rate,
         )
         self.feature_encoder = FeatureEncoder(
-            dim=configs.dim,
-            num_heads=configs.num_heads,
+            dim=configs.dim_student,
+            num_heads=configs.num_heads_student,
             kernel_size=7,
             num_layers=1,
             max_pos_len=configs.max_pos_len,
@@ -69,14 +69,14 @@ class LightVSLNet(nn.Module):
         )
         
         # video and query fusion
-        self.cq_attention = CQAttention(dim=configs.dim, drop_rate=configs.drop_rate)
-        self.cq_concat = CQConcatenate(dim=configs.dim)
+        self.cq_attention = CQAttention(dim=configs.dim_student, drop_rate=configs.drop_rate)
+        self.cq_concat = CQConcatenate(dim=configs.dim_student)
         # query-guided highlighting
-        self.highlight_layer = HighLightLayer(dim=configs.dim)
+        self.highlight_layer = HighLightLayer(dim=configs.dim_student)
         # conditioned predictor
         self.predictor = ConditionedPredictor(
-            dim=configs.dim,
-            num_heads=configs.num_heads,
+            dim=configs.dim_student,
+            num_heads=configs.num_heads_student,
             drop_rate=configs.drop_rate,
             max_pos_len=configs.max_pos_len,
             predictor=configs.predictor,
@@ -85,7 +85,7 @@ class LightVSLNet(nn.Module):
         # If pretrained transformer, initialize_parameters and load.
         if configs.predictor == "bert":
             # Project back from BERT to dim.
-            self.query_affine = nn.Linear(768, configs.dim)
+            self.query_affine = nn.Linear(768, configs.dim_student)
             # init parameters
             self.init_parameters()
             self.embedding_net = BertEmbedding(configs.text_agnostic)
@@ -93,7 +93,7 @@ class LightVSLNet(nn.Module):
             self.embedding_net = Embedding(
                 num_words=configs.word_size,
                 num_chars=configs.char_size,
-                out_dim=configs.dim,
+                out_dim=configs.dim_student,
                 word_dim=configs.word_dim,
                 char_dim=configs.char_dim,
                 word_vectors=word_vectors,

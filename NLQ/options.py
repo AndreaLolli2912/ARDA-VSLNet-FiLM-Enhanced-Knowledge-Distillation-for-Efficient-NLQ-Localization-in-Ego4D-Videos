@@ -66,6 +66,7 @@ def read_command_line():
         help="character dimension, set to 100 for activitynet",
     )
     parser.add_argument("--dim", type=int, default=128, help="hidden size")
+    parser.add_argument("--dim_student", type=int, default=64, help="hidden size")
     parser.add_argument(
         "--highlight_lambda",
         type=float,
@@ -73,6 +74,7 @@ def read_command_line():
         help="lambda for highlight region",
     )
     parser.add_argument("--num_heads", type=int, default=8, help="number of heads")
+    parser.add_argument("--num_heads_student", type=int, default=2, help="number of heads")
     parser.add_argument("--drop_rate", type=float, default=0.2, help="dropout rate")
     parser.add_argument(
         "--predictor", type=str, default="rnn", help="[rnn | transformer]"
