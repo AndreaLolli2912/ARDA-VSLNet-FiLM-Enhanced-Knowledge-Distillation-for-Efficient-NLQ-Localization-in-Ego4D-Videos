@@ -121,9 +121,10 @@ def main(configs, parser):
         )
         print("start training...", flush=True)
         global_step = 0
-        model_dir_teacher = "/content/nlq_official_v1_deep/checkpoints/egovlp_fp16"
+        model_dir_teacher = "/content/nlq_official_v1/checkpoints/egovlp_fp16/deepvslnet_nlq_official_v1_egovlp_fp16_official_128_bert/model"
         filename = get_last_checkpoint(model_dir_teacher, suffix="t7")
         teacher.load_state_dict(torch.load(filename))
+
         for epoch in range(configs.epochs):
             teacher.eval()
             student.train()
