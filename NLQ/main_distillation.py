@@ -29,9 +29,9 @@ def main(configs, parser):
     print(f"Running with {configs}", flush=True)
 
     # TODO metterli come hyperpar
-    feature_map_weight = 0.25
-    ce_loss_weight = 0.75
-    distill_weight_loss = 0.2
+    feature_map_weight = configs.feature_map_weight
+    ce_loss_weight = configs.ce_loss_weight
+    distill_weight_loss = configs.distill_weight_loss
 
     # set tensorflow configs
     set_th_config(configs.seed)

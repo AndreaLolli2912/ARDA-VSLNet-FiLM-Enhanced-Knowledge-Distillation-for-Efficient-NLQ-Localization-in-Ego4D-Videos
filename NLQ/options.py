@@ -121,6 +121,9 @@ def read_command_line():
         default="checkpoints",
         help="path to save trained model weights",
     )
+    parser.add_argument("--feature_map_weight", type=float, default=0.25)
+    parser.add_argument("--ce_loss_weight", type=float, default=0.75)
+    parser.add_argument("--distill_weight_loss", type=float, default=0.2)
     parser.add_argument("--model_name", type=str, default="vslnet", help="[vslnet | vslbase] model name")  # noqa
     parser.add_argument(
         "--suffix",
