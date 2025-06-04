@@ -126,11 +126,7 @@ class DeepVSLNet(nn.Module):
             query_features = self.embedding_net(word_ids, char_ids)
 
         query_features = self.feature_encoder(query_features, mask=q_mask)
-        # Estrai un vettore globale di query (media pooling)
-        q_mask_exp = q_mask.unsqueeze(2).float()  # [B, L_q, 1]
-        q_embed = (query_features * q_mask_exp).sum(dim=1) / q_mask_exp.sum(dim=1)
-
-        video_features = self.feature_encoder(video_features, mask=v_mask, cond=q_embed)
+        video_features = self.feature_encoder(video_features, mask=v_mask)
  
         features = self.cq_attention(video_features, query_features, v_mask, q_mask)
         features = self.cq_concat(features, query_features, q_mask)
