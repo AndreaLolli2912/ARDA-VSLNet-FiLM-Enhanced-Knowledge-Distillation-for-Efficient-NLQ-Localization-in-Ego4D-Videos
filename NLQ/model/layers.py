@@ -571,16 +571,48 @@ class ConditionedPredictor(nn.Module):
         return start_loss + end_loss
 
 class FiLM(nn.Module):
-    def __init__(self, input_dim, num_channels):
+    """
+    A modular Feature-wise Linear Modulation (FiLM) layer that takes:
+    - conditioning input: query matrix [B, L_q, d]
+    - modulated input: video features [B, L_v, d]
+    It outputs FiLM-modulated video features of shape [B, L_v, d].
+    """
+    def __init__(self, dim, pooling='mean'):
         super(FiLM, self).__init__()
-        self.gamma_layer = nn.Linear(input_dim, num_channels)
-        self.beta_layer = nn.Linear(input_dim, num_channels)
+        self.dim = dim
+        self.pooling = pooling
+        self.film_generator = nn.Linear(dim, 2 * dim)
 
-    def forward(self, visual_feat, conditioning_feat):
+    def forward(self, video_feats, query_feats, query_mask=None):
         """
-        visual_feat: [B, T, C]  (video features)
-        conditioning_feat: [B, C] (global query embedding)
+        video_feats: Tensor of shape [B, L_v, d]
+        query_feats: Tensor of shape [B, L_q, d]
+        query_mask:  Tensor of shape [B, L_q] (1 for valid tokens, 0 for padding)
         """
-        gamma = self.gamma_layer(conditioning_feat).unsqueeze(1)  # [B, 1, C]
-        beta = self.beta_layer(conditioning_feat).unsqueeze(1)    # [B, 1, C]
-        return gamma * visual_feat + beta
+        pooled_query = self.pool_query(query_feats, query_mask)
+
+        # Step 2: Generate FiLM parameters
+        gamma_beta = self.film_generator(pooled_query)  # [B, 2d]
+        gamma, beta = gamma_beta.chunk(2, dim=-1)       # each [B, d]
+
+        # Step 3: Apply FiLM modulation (broadcast over sequence length)
+        gamma = gamma.unsqueeze(1)  # [B, 1, d]
+        beta = beta.unsqueeze(1)    # [B, 1, d]
+
+        return gamma * video_feats + beta  # [B, L_v, d]
+    
+    def pool_query(self, query_feats, query_mask):
+        # Step 1: Pool the query
+        if self.pooling == 'mean':
+            if query_mask is not None:
+                # mask-aware mean pooling
+                mask = query_mask.unsqueeze(-1).float()  # [B, L_q, 1]
+                pooled_query = (query_feats * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1e-6)
+            else:
+                pooled_query = query_feats.mean(dim=1)
+        elif self.pooling == 'cls':
+            pooled_query = query_feats[:, 0, :]  # assumes [CLS] token is first
+        else:
+            raise ValueError(f"Unsupported pooling method: {self.pooling}")
+    
+        return pooled_query

@@ -59,6 +59,9 @@ class DeepVSLNet(nn.Module):
             dim=configs.dim,
             drop_rate=configs.drop_rate,
         )
+        self.linear_modulation = FiLM(
+            dim=configs.dim
+        )
         self.feature_encoder = FeatureEncoder(
             dim=configs.dim,
             num_heads=configs.num_heads,
@@ -124,6 +127,9 @@ class DeepVSLNet(nn.Module):
             query_features = self.query_affine(query_features)
         else:
             query_features = self.embedding_net(word_ids, char_ids)
+
+        # FiLM layer
+        video_features = self.linear_modulation(video_features, query_features, q_mask)
 
         query_features = self.feature_encoder(query_features, mask=q_mask)
         video_features = self.feature_encoder(video_features, mask=v_mask)
