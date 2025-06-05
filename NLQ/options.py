@@ -67,6 +67,12 @@ def read_command_line():
     )
     parser.add_argument("--dim", type=int, default=128, help="hidden size")
     parser.add_argument(
+        "--film_mode",
+        type=str,
+        default="before_encoder",
+        choices=["before_encoder", "after_encoder_raw", "after_encoder_enc"]
+    )
+    parser.add_argument(
         "--highlight_lambda",
         type=float,
         default=5.0,
