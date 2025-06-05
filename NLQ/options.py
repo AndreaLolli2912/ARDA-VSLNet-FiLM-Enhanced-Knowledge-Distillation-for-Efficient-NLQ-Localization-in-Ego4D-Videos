@@ -76,7 +76,8 @@ def read_command_line():
             "inside_encoder:after_pos", 
             "inside_encoder:after_conv", 
             "inside_encoder:after_attn",
-            "inside_encoder:multi"
+            "inside_encoder:multi",
+            "off"
         ])
     parser.add_argument(
         "--highlight_lambda",
