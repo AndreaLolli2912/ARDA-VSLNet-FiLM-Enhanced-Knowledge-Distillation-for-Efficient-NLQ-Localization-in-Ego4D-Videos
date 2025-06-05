@@ -329,14 +329,26 @@ class FeatureEncoder(nn.Module):
         self.attention_block = MultiHeadAttentionBlock(
             dim=dim, num_heads=num_heads, drop_rate=drop_rate
         )
+        self.linear_modulation = FiLM(
+            dim
+        )
 
-    def forward(self, x, mask=None):
-
+    def forward(self, x, mask, query_feats=None, query_mask=None, film_mode="off"):
         features = x + self.pos_embedding(x)  # (batch_size, seq_len, dim)
+        
+        if film_mode in ["inside_encoder:after_pos", "inside_encoder:multi"]:
+            features = self.film_after_pos(features, query_feats, query_mask)
+
         features = self.conv_block(features)  # (batch_size, seq_len, dim)
-        features = self.attention_block(
-            features, mask=mask
-        )  # (batch_size, seq_len, dim)
+
+        if film_mode in ["inside_encoder:after_conv", "inside_encoder:multi"]:
+            features = self.film_after_conv(features, query_feats, query_mask)
+
+        features = self.attention_block(features, mask=mask)  # (batch_size, seq_len, dim)
+
+        if film_mode in ["inside_encoder:after_attn", "inside_encoder:multi"]:
+            features = self.film_after_attn(features, query_feats, query_mask)
+            
         return features
 
 

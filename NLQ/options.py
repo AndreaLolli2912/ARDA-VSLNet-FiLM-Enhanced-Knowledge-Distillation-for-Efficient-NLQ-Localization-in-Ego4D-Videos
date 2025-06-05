@@ -70,8 +70,14 @@ def read_command_line():
         "--film_mode",
         type=str,
         default="before_encoder",
-        choices=["before_encoder", "after_encoder_raw", "after_encoder_enc"]
-    )
+        choices=[
+            "before_encoder", 
+            "after_encoder",
+            "inside_encoder:after_pos", 
+            "inside_encoder:after_conv", 
+            "inside_encoder:after_attn",
+            "inside_encoder:multi"
+        ])
     parser.add_argument(
         "--highlight_lambda",
         type=float,

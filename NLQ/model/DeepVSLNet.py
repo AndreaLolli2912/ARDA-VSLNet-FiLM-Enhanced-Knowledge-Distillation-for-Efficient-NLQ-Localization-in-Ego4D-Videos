@@ -131,16 +131,23 @@ class DeepVSLNet(nn.Module):
         # FiLM before feature encoder
         if self.configs.film_mode == "before_encoder":
             video_features = self.linear_modulation(video_features, query_features, q_mask)
-        # Encode video
-        video_features = self.feature_encoder(video_features, mask=v_mask)
-        # FiLM after video encoder (using raw query)
-        if self.configs.film_mode == "after_encoder_raw":
-            video_features = self.linear_modulation(video_features, query_features, q_mask)
+
         # Encode query
         query_features = self.feature_encoder(query_features, mask=q_mask)
+
+        # Encode video
+        video_features = self.feature_encoder(
+            video_features, 
+            mask=v_mask, 
+            query_feats=query_features, 
+            query_mask=q_mask, 
+            film_mode=self.configs.film_mode
+        )
+        
         # FiLM after video encoder (using encoded query)
-        if self.configs.film_mode == "after_encoder_enc":
+        if self.configs.film_mode == "after_encoder":
             video_features = self.linear_modulation(video_features, query_features, q_mask)
+
         # Cross-attention and prediction
         features = self.cq_attention(video_features, query_features, v_mask, q_mask)
         features = self.cq_concat(features, query_features, q_mask)
