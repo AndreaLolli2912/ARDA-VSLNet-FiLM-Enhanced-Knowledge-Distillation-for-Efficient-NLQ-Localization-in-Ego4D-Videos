@@ -330,25 +330,25 @@ class FeatureEncoder(nn.Module):
             dim=dim, num_heads=num_heads, drop_rate=drop_rate
         )
 
-        self.film_after_pos  = FiLM(dim)
+        self.film_after_pos = FiLM(dim)
         self.film_after_conv = FiLM(dim)
         self.film_after_attn = FiLM(dim)
 
-    def forward(self, x, mask=None, query_feats=None, film_mode="off"):
+    def forward(self, x, mask, query_feats=None, query_mask=None, film_mode="off"):
         features = x + self.pos_embedding(x)  # (batch_size, seq_len, dim)
         
         if film_mode in ["inside_encoder:after_pos", "inside_encoder:multi"]:
-            features = self.film_after_pos(features, query_feats)
+            features = self.film_after_pos(features, query_feats, query_mask)
 
         features = self.conv_block(features)  # (batch_size, seq_len, dim)
 
         if film_mode in ["inside_encoder:after_conv", "inside_encoder:multi"]:
-            features = self.film_after_conv(features, query_feats)
+            features = self.film_after_conv(features, query_feats, query_mask)
 
         features = self.attention_block(features, mask=mask)  # (batch_size, seq_len, dim)
 
         if film_mode in ["inside_encoder:after_attn", "inside_encoder:multi"]:
-            features = self.film_after_attn(features, query_feats)
+            features = self.film_after_attn(features, query_feats, query_mask)
             
         return features
 
@@ -585,45 +585,48 @@ class ConditionedPredictor(nn.Module):
 
 class FiLM(nn.Module):
     """
-    Feature-wise Linear Modulation (FiLM) layer.
-    Conditions video_feats using masked query_feats without attention,
-    projecting from query length L_q to video length L_v.
+    A modular Feature-wise Linear Modulation (FiLM) layer that takes:
+    - conditioning input: query matrix [B, L_q, d]
+    - modulated input: video features [B, L_v, d]
+    It outputs FiLM-modulated video features of shape [B, L_v, d].
     """
-    def __init__(self, dim):
+    def __init__(self, dim, pooling='mean'):
         super(FiLM, self).__init__()
         self.dim = dim
+        self.pooling = pooling
+        self.film_generator = nn.Linear(dim, 2 * dim)
 
-        # Step 1: Project per query token to gamma/beta space
-        self.query_proj = nn.Linear(dim, 2 * dim)
-
-        # Step 2: Temporal projection: L_q → L_v (handled dynamically in forward)
-        # We'll use nn.Linear on the sequence dim (L_q → L_v)
-        self.temporal_proj = None  # initialized at runtime
-
-    def forward(self, video_feats, query_feats):
+    def forward(self, video_feats, query_feats, query_mask=None):
         """
-        video_feats: [B, L_v, d]
-        query_feats: [B, L_q, d]
-        query_mask:  [B, L_q] (1 for valid, 0 for padding)
+        video_feats: Tensor of shape [B, L_v, d]
+        query_feats: Tensor of shape [B, L_q, d]
+        query_mask:  Tensor of shape [B, L_q] (1 for valid tokens, 0 for padding)
         """
-        B, L_v, D = video_feats.shape
-        L_q = query_feats.size(1)
+        pooled_query = self.pool_query(query_feats, query_mask)
 
-        # Project each query token to gamma/beta space
-        gamma_beta_q = self.query_proj(query_feats)  # [B, L_q, 2D]
+        # Step 2: Generate FiLM parameters
+        gamma_beta = self.film_generator(pooled_query)  # [B, 2d]
+        gamma, beta = gamma_beta.chunk(2, dim=-1)       # each [B, d]
 
-        # Set up the temporal projection if needed
-        if self.temporal_proj is None or self.temporal_proj.in_features != L_q or self.temporal_proj.out_features != L_v:
-            self.temporal_proj = nn.Linear(L_q, L_v).to(video_feats.device)
+        # Step 3: Apply FiLM modulation (broadcast over sequence length)
+        gamma = gamma.unsqueeze(1)  # [B, 1, d]
+        beta = beta.unsqueeze(1)    # [B, 1, d]
 
-        # Transpose for projection across time: [B, 2D, L_q]
-        gamma_beta_q = gamma_beta_q.transpose(1, 2)  # [B, 2D, L_q]
-        gamma_beta_v = self.temporal_proj(gamma_beta_q)  # [B, 2D, L_v]
-        gamma_beta_v = gamma_beta_v.transpose(1, 2)  # [B, L_v, 2D]
-
-        # Split into gamma and beta
-        gamma, beta = gamma_beta_v.chunk(2, dim=-1)  # each [B, L_v, D]
-
-        # Apply FiLM modulation
-        return gamma * video_feats + beta  # [B, L_v, D]
+        return gamma * video_feats + beta  # [B, L_v, d]
+    
+    def pool_query(self, query_feats, query_mask):
+        # Step 1: Pool the query
+        if self.pooling == 'mean':
+            if query_mask is not None:
+                # mask-aware mean pooling
+                mask = query_mask.unsqueeze(-1).float()  # [B, L_q, 1]
+                pooled_query = (query_feats * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1e-6)
+            else:
+                pooled_query = query_feats.mean(dim=1)
+        elif self.pooling == 'cls':
+            pooled_query = query_feats[:, 0, :]  # assumes [CLS] token is first
+        else:
+            raise ValueError(f"Unsupported pooling method: {self.pooling}")
+    
+        return pooled_query
 
