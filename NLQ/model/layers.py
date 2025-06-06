@@ -611,7 +611,6 @@ class FiLM(nn.Module):
 
         # Project each query token to gamma/beta space
         gamma_beta_q = self.query_proj(query_feats)  # [B, L_q, 2D]
-        gamma_beta_q = self.dropout(gamma_beta_q)
 
         # Set up the temporal projection if needed
         if self.temporal_proj is None or self.temporal_proj.in_features != L_q or self.temporal_proj.out_features != L_v:
