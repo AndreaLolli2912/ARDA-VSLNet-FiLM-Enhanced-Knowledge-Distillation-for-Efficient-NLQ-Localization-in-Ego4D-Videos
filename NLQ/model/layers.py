@@ -334,21 +334,21 @@ class FeatureEncoder(nn.Module):
         self.film_after_conv = FiLM(dim)
         self.film_after_attn = FiLM(dim)
 
-    def forward(self, x, mask, query_feats=None, query_mask=None, film_mode="off"):
+    def forward(self, x, mask, query_feats=None, film_mode="off"):
         features = x + self.pos_embedding(x)  # (batch_size, seq_len, dim)
         
         if film_mode in ["inside_encoder:after_pos", "inside_encoder:multi"]:
-            features = self.film_after_pos(features, query_feats, query_mask)
+            features = self.film_after_pos(features, query_feats)
 
         features = self.conv_block(features)  # (batch_size, seq_len, dim)
 
         if film_mode in ["inside_encoder:after_conv", "inside_encoder:multi"]:
-            features = self.film_after_conv(features, query_feats, query_mask)
+            features = self.film_after_conv(features, query_feats)
 
         features = self.attention_block(features, mask=mask)  # (batch_size, seq_len, dim)
 
         if film_mode in ["inside_encoder:after_attn", "inside_encoder:multi"]:
-            features = self.film_after_attn(features, query_feats, query_mask)
+            features = self.film_after_attn(features, query_feats)
             
         return features
 
@@ -583,6 +583,9 @@ class ConditionedPredictor(nn.Module):
         end_loss = nn.CrossEntropyLoss(reduction="mean")(end_logits, end_labels)
         return start_loss + end_loss
 
+import torch
+import torch.nn as nn
+
 class FiLM(nn.Module):
     """
     A modular Feature-wise Linear Modulation (FiLM) layer that takes:
@@ -596,37 +599,27 @@ class FiLM(nn.Module):
         self.pooling = pooling
         self.film_generator = nn.Linear(dim, 2 * dim)
 
-    def forward(self, video_feats, query_feats, query_mask=None):
+    def forward(self, video_feats, query_feats, query_mask=None):  # query_mask unused
         """
         video_feats: Tensor of shape [B, L_v, d]
         query_feats: Tensor of shape [B, L_q, d]
-        query_mask:  Tensor of shape [B, L_q] (1 for valid tokens, 0 for padding)
         """
-        pooled_query = self.pool_query(query_feats, query_mask)
+        pooled_query = self.pool_query(query_feats)
 
-        # Step 2: Generate FiLM parameters
+        # Generate FiLM parameters
         gamma_beta = self.film_generator(pooled_query)  # [B, 2d]
         gamma, beta = gamma_beta.chunk(2, dim=-1)       # each [B, d]
 
-        # Step 3: Apply FiLM modulation (broadcast over sequence length)
+        # Apply FiLM modulation
         gamma = gamma.unsqueeze(1)  # [B, 1, d]
         beta = beta.unsqueeze(1)    # [B, 1, d]
 
         return gamma * video_feats + beta  # [B, L_v, d]
-    
-    def pool_query(self, query_feats, query_mask):
-        # Step 1: Pool the query
+
+    def pool_query(self, query_feats):
         if self.pooling == 'mean':
-            if query_mask is not None:
-                # mask-aware mean pooling
-                mask = query_mask.unsqueeze(-1).float()  # [B, L_q, 1]
-                pooled_query = (query_feats * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1e-6)
-            else:
-                pooled_query = query_feats.mean(dim=1)
+            return query_feats.mean(dim=1)  # simple mean pooling over L_q
         elif self.pooling == 'cls':
-            pooled_query = query_feats[:, 0, :]  # assumes [CLS] token is first
+            return query_feats[:, 0, :]     # assumes CLS token at position 0
         else:
             raise ValueError(f"Unsupported pooling method: {self.pooling}")
-    
-        return pooled_query
-
