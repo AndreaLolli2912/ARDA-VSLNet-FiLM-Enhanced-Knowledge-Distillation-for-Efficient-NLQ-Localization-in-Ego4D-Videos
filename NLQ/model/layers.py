@@ -330,9 +330,9 @@ class FeatureEncoder(nn.Module):
             dim=dim, num_heads=num_heads, drop_rate=drop_rate
         )
 
-        self.film_after_pos  = FiLM(dim, drop_rate)
-        self.film_after_conv = FiLM(dim, drop_rate)
-        self.film_after_attn = FiLM(dim, drop_rate)
+        self.film_after_pos  = FiLM(dim)
+        self.film_after_conv = FiLM(dim)
+        self.film_after_attn = FiLM(dim)
 
     def forward(self, x, mask, query_feats=None, query_mask=None, film_mode="off"):
         features = x + self.pos_embedding(x)  # (batch_size, seq_len, dim)
@@ -589,10 +589,9 @@ class FiLM(nn.Module):
     Conditions video_feats using masked query_feats without attention,
     projecting from query length L_q to video length L_v.
     """
-    def __init__(self, dim, drop_rate):
+    def __init__(self, dim):
         super(FiLM, self).__init__()
         self.dim = dim
-        self.dropout = nn.Dropout(drop_rate)
 
         # Step 1: Project per query token to gamma/beta space
         self.query_proj = nn.Linear(dim, 2 * dim)
@@ -601,7 +600,7 @@ class FiLM(nn.Module):
         # We'll use nn.Linear on the sequence dim (L_q → L_v)
         self.temporal_proj = None  # initialized at runtime
 
-    def forward(self, video_feats, query_feats, query_mask=None):
+    def forward(self, video_feats, query_feats):
         """
         video_feats: [B, L_v, d]
         query_feats: [B, L_q, d]
@@ -609,11 +608,6 @@ class FiLM(nn.Module):
         """
         B, L_v, D = video_feats.shape
         L_q = query_feats.size(1)
-
-        # Apply mask to query_feats
-        if query_mask is not None:
-            mask = query_mask.unsqueeze(-1).float()  # [B, L_q, 1]
-            query_feats = query_feats * mask         # zero out paddings
 
         # Project each query token to gamma/beta space
         gamma_beta_q = self.query_proj(query_feats)  # [B, L_q, 2D]
