@@ -585,49 +585,52 @@ class ConditionedPredictor(nn.Module):
 
 class FiLM(nn.Module):
     """
-    A modular Feature-wise Linear Modulation (FiLM) layer that takes:
-    - conditioning input: query matrix [B, L_q, d]
-    - modulated input: video features [B, L_v, d]
-    It outputs FiLM-modulated video features of shape [B, L_v, d].
+    Feature-wise Linear Modulation (FiLM) layer.
+    Conditions video_feats using masked query_feats without attention,
+    projecting from query length L_q to video length L_v.
     """
-    def __init__(self, dim, drop_rate, pooling='mean'):
+    def __init__(self, dim, drop_rate):
         super(FiLM, self).__init__()
         self.dim = dim
-        self.pooling = pooling
-        self.film_generator = nn.Linear(dim, 2 * dim)
-        self.dropout = nn.Dropout(p=drop_rate)
+        self.dropout = nn.Dropout(drop_rate)
+
+        # Step 1: Project per query token to gamma/beta space
+        self.query_proj = nn.Linear(dim, 2 * dim)
+
+        # Step 2: Temporal projection: L_q → L_v (handled dynamically in forward)
+        # We'll use nn.Linear on the sequence dim (L_q → L_v)
+        self.temporal_proj = None  # initialized at runtime
 
     def forward(self, video_feats, query_feats, query_mask=None):
         """
-        video_feats: Tensor of shape [B, L_v, d]
-        query_feats: Tensor of shape [B, L_q, d]
-        query_mask:  Tensor of shape [B, L_q] (1 for valid tokens, 0 for padding)
+        video_feats: [B, L_v, d]
+        query_feats: [B, L_q, d]
+        query_mask:  [B, L_q] (1 for valid, 0 for padding)
         """
-        pooled_query = self.pool_query(query_feats, query_mask)
+        B, L_v, D = video_feats.shape
+        L_q = query_feats.size(1)
 
-        # Step 2: Generate FiLM parameters
-        gamma_beta = self.film_generator(pooled_query)  # [B, 2d]
-        gamma_beta = self.dropout(gamma_beta)
-        gamma, beta = gamma_beta.chunk(2, dim=-1)       # each [B, d]
+        # Apply mask to query_feats
+        if query_mask is not None:
+            mask = query_mask.unsqueeze(-1).float()  # [B, L_q, 1]
+            query_feats = query_feats * mask         # zero out paddings
 
-        # Step 3: Apply FiLM modulation (broadcast over sequence length)
-        gamma = gamma.unsqueeze(1)  # [B, 1, d]
-        beta = beta.unsqueeze(1)    # [B, 1, d]
+        # Project each query token to gamma/beta space
+        gamma_beta_q = self.query_proj(query_feats)  # [B, L_q, 2D]
+        gamma_beta_q = self.dropout(gamma_beta_q)
 
-        return gamma * video_feats + beta  # [B, L_v, d]
-    
-    def pool_query(self, query_feats, query_mask):
-        # Step 1: Pool the query
-        if self.pooling == 'mean':
-            if query_mask is not None:
-                # mask-aware mean pooling
-                mask = query_mask.unsqueeze(-1).float()  # [B, L_q, 1]
-                pooled_query = (query_feats * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1e-6)
-            else:
-                pooled_query = query_feats.mean(dim=1)
-        elif self.pooling == 'cls':
-            pooled_query = query_feats[:, 0, :]  # assumes [CLS] token is first
-        else:
-            raise ValueError(f"Unsupported pooling method: {self.pooling}")
-    
-        return pooled_query
+        # Set up the temporal projection if needed
+        if self.temporal_proj is None or self.temporal_proj.in_features != L_q or self.temporal_proj.out_features != L_v:
+            self.temporal_proj = nn.Linear(L_q, L_v).to(video_feats.device)
+
+        # Transpose for projection across time: [B, 2D, L_q]
+        gamma_beta_q = gamma_beta_q.transpose(1, 2)  # [B, 2D, L_q]
+        gamma_beta_v = self.temporal_proj(gamma_beta_q)  # [B, 2D, L_v]
+        gamma_beta_v = gamma_beta_v.transpose(1, 2)  # [B, L_v, 2D]
+
+        # Split into gamma and beta
+        gamma, beta = gamma_beta_v.chunk(2, dim=-1)  # each [B, L_v, D]
+
+        # Apply FiLM modulation
+        return gamma * video_feats + beta  # [B, L_v, D]
+
