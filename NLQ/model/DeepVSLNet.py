@@ -137,10 +137,9 @@ class DeepVSLNet(nn.Module):
 
         # Encode video
         video_features = self.feature_encoder(
-            video_features, 
-            mask=v_mask, 
-            query_feats=query_features, 
-            query_mask=q_mask, 
+            video_features,
+            mask=v_mask,
+            query_feats=query_features,
             film_mode=self.configs.film_mode
         )
         

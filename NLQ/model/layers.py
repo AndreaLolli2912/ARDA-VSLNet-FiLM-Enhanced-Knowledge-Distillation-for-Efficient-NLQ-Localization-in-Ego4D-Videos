@@ -334,7 +334,7 @@ class FeatureEncoder(nn.Module):
         self.film_after_conv = FiLM(dim)
         self.film_after_attn = FiLM(dim)
 
-    def forward(self, x, query_feats=None, film_mode="off"):
+    def forward(self, x, mask=None, query_feats=None, film_mode="off"):
         features = x + self.pos_embedding(x)  # (batch_size, seq_len, dim)
         
         if film_mode in ["inside_encoder:after_pos", "inside_encoder:multi"]:
