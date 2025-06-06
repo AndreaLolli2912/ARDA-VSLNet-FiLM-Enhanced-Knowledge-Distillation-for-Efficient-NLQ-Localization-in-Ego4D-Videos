@@ -330,9 +330,9 @@ class FeatureEncoder(nn.Module):
             dim=dim, num_heads=num_heads, drop_rate=drop_rate
         )
 
-        self.film_after_pos = FiLM(dim)
-        self.film_after_conv = FiLM(dim)
-        self.film_after_attn = FiLM(dim)
+        self.film_after_pos  = FiLM(dim, drop_rate)
+        self.film_after_conv = FiLM(dim, drop_rate)
+        self.film_after_attn = FiLM(dim, drop_rate)
 
     def forward(self, x, mask, query_feats=None, query_mask=None, film_mode="off"):
         features = x + self.pos_embedding(x)  # (batch_size, seq_len, dim)
@@ -590,11 +590,12 @@ class FiLM(nn.Module):
     - modulated input: video features [B, L_v, d]
     It outputs FiLM-modulated video features of shape [B, L_v, d].
     """
-    def __init__(self, dim, pooling='mean'):
+    def __init__(self, dim, drop_rate, pooling='mean'):
         super(FiLM, self).__init__()
         self.dim = dim
         self.pooling = pooling
         self.film_generator = nn.Linear(dim, 2 * dim)
+        self.dropout = nn.Dropout(p=drop_rate)
 
     def forward(self, video_feats, query_feats, query_mask=None):
         """
@@ -606,6 +607,7 @@ class FiLM(nn.Module):
 
         # Step 2: Generate FiLM parameters
         gamma_beta = self.film_generator(pooled_query)  # [B, 2d]
+        gamma_beta = self.dropout(gamma_beta)
         gamma, beta = gamma_beta.chunk(2, dim=-1)       # each [B, d]
 
         # Step 3: Apply FiLM modulation (broadcast over sequence length)

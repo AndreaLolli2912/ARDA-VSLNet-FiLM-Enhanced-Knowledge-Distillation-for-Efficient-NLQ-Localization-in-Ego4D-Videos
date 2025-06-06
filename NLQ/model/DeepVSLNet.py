@@ -60,7 +60,8 @@ class DeepVSLNet(nn.Module):
             drop_rate=configs.drop_rate,
         )
         self.linear_modulation = FiLM(
-            dim=configs.dim
+            dim=configs.dim,
+            drop_rate=configs.drop_rate
         )
         self.feature_encoder = FeatureEncoder(
             dim=configs.dim,
