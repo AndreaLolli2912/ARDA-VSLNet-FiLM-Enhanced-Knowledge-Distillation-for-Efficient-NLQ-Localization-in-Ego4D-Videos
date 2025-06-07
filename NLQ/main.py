@@ -174,11 +174,11 @@ def main(configs, parser):
                 # generate mask
                 video_mask = convert_length_to_mask(vfeat_lens).to(device)
                 # compute logits
-                # if configs.model_name == "vslnet" or "deepvslnet":
-                #     h_score, start_logits, end_logits = model(
-                #         word_ids, char_ids, vfeats, video_mask, query_mask
-                #     )
-                if configs.model_name == "vslbase":
+                if configs.model_name in ["vslnet", "deepvslnet"]:
+                    h_score, start_logits, end_logits = model(
+                        word_ids, char_ids, vfeats, video_mask, query_mask
+                    )
+                elif configs.model_name == "vslbase":
                     start_logits, end_logits = model(
                         word_ids, char_ids, vfeats, video_mask, query_mask
                     )
@@ -188,7 +188,7 @@ def main(configs, parser):
                     start_logits, end_logits, s_labels, e_labels
                 )
 
-                if configs.model_name == "vslnet" or "deepvslnet":
+                if configs.model_name in ["vslnet", "deepvslnet"]:
                     highlight_loss = model.compute_highlight_loss(
                     h_score, h_labels, video_mask
                     )
@@ -204,7 +204,7 @@ def main(configs, parser):
                 )  # clip gradient
                 optimizer.step()
                 scheduler.step()
-                if configs.model_name == "vslnet" or "deepvslnet":
+                if configs.model_name in ["vslnet", "deepvslnet"]:
                     if writer is not None and global_step % configs.tb_log_freq == 0:
                         writer.add_scalar("Loss/Total", total_loss.detach().cpu(), global_step)
                         writer.add_scalar("Loss/Loc", loc_loss.detach().cpu(), global_step)
