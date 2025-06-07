@@ -121,7 +121,7 @@ def main(configs, parser):
         )
         print("start training...", flush=True)
         global_step = 0
-        model_dir_teacher = "/content/nlq_official_v1_teacher/checkpoints/egovlp_fp16/model"
+        model_dir_teacher = configs.model_dir_teacher
         filename = get_last_checkpoint(model_dir_teacher, suffix="t7")
         teacher.load_state_dict(torch.load(filename))
 

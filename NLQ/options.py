@@ -12,6 +12,12 @@ def read_command_line():
     parser = argparse.ArgumentParser()
     # data parameters
     parser.add_argument(
+        "model_dir_teacher",
+        type=str,
+        default="/content/nlq_official_v1_teacher/checkpoints/egovlp_fp16/model",
+        help="path to teacher checkpoints"
+    )
+    parser.add_argument(
         "--save_dir",
         type=str,
         default="datasets",
