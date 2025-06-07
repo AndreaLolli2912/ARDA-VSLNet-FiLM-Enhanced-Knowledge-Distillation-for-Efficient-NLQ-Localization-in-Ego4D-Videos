@@ -119,8 +119,11 @@ class DeepVSLNet(nn.Module):
 
     def forward(self, word_ids, char_ids, video_features, v_mask, q_mask):
         video_features = self.video_affine(video_features)
-        query_features = self.embedding_net(word_ids)
-        query_features = self.query_affine(query_features)
+        if self.configs.predictor == "bert":
+            query_features = self.embedding_net(word_ids)
+            query_features = self.query_affine(query_features)
+        else:
+            query_features = self.embedding_net(word_ids, char_ids)
 
         query_features = self.feature_encoder(query_features, mask=q_mask)
         # Estrai un vettore globale di query (media pooling)
