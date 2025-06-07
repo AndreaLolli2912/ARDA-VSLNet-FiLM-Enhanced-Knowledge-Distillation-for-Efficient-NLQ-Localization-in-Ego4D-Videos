@@ -69,7 +69,7 @@ def read_command_line():
     parser.add_argument(
         "--film_mode",
         type=str,
-        default="before_encoder",
+        default="off",
         choices=[
             "before_encoder", 
             "after_encoder",
