@@ -59,6 +59,9 @@ class LightVSLNet(nn.Module):
             dim=configs.dim_student,
             drop_rate=configs.drop_rate,
         )
+        self.linear_modulation = FiLM(
+            dim=configs.dim
+        )
         self.feature_encoder = FeatureEncoder(
             dim=configs.dim_student,
             num_heads=configs.num_heads_student,
@@ -125,12 +128,22 @@ class LightVSLNet(nn.Module):
         else:
             query_features = self.embedding_net(word_ids, char_ids)
 
+        if self.configs.film_mode == "before_encoder":
+            video_features = self.linear_modulation(video_features, query_features)
+
         query_features = self.feature_encoder(query_features, mask=q_mask)
         
         q_mask_exp = q_mask.unsqueeze(2).float()  # [B, L_q, 1]
-        q_embed = (query_features * q_mask_exp).sum(dim=1) / q_mask_exp.sum(dim=1)
+        
+        video_features = self.feature_encoder(
+            video_features,
+            mask=v_mask,
+            query_feats=query_features,
+            film_mode=self.configs.film_mode
+        )
 
-        video_features = self.feature_encoder(video_features, mask=v_mask, cond=q_embed)
+        if self.configs.film_mode == "after_encoder":
+            video_features = self.linear_modulation(video_features, query_features)
  
         features = self.cq_attention(video_features, query_features, v_mask, q_mask)
         features = self.cq_concat(features, query_features, q_mask)
