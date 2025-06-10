@@ -79,6 +79,19 @@ def read_command_line():
         default=5.0,
         help="lambda for highlight region",
     )
+    parser.add_argument(
+        "--film_mode",
+        type=str,
+        default="before_encoder",
+        choices=[
+            "before_encoder", 
+            "after_encoder",
+            "inside_encoder:after_pos", 
+            "inside_encoder:after_conv", 
+            "inside_encoder:after_attn",
+            "inside_encoder:multi",
+            "off"
+    ])
     parser.add_argument("--num_heads", type=int, default=8, help="number of heads")
     parser.add_argument("--num_heads_student", type=int, default=2, help="number of heads")
     parser.add_argument("--drop_rate", type=float, default=0.2, help="dropout rate")
