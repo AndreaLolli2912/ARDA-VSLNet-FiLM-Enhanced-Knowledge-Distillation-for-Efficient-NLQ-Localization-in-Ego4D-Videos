@@ -69,6 +69,7 @@ class DeepVSLNet(nn.Module):
         # Instantiate the BERT embedding (frozen inside BertEmbedding)
         self.embedding_net = BertEmbedding(configs.text_agnostic)
 
+
         # ─── Block 2 layers ───────────────────────────────────────────────────
         self.feature_encoder = FeatureEncoder(
             dim=configs.dim,

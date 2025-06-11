@@ -1,8 +1,11 @@
+from argparse import Namespace
 from copy import deepcopy
 import torch
 from torch import nn
 from transformers import get_linear_schedule_with_warmup
+from NLQ.utils.runner_utils import convert_length_to_mask
 from NLQ.utils.cbkd_config import CBKDConfig
+from NLQ.utils.
 from NLQ.model.DeepVSLNet_cbkd import DeepVSLNet
 from NLQ.model.layers import DepthwiseSeparableConvBlock
 
@@ -262,9 +265,9 @@ def run_cbkd_stage(
     teacher: DeepVSLNet,
     distilled_blocks: dict,
     stage_idx: int,
+    configs: Namespace,
     cbkd_cfg: CBKDConfig,
     train_loader: torch.utils.data.DataLoader,
-    val_loader: torch.utils.data.DataLoader,
     total_blocks: int,
     device: torch.device
 ):
@@ -301,9 +304,13 @@ def run_cbkd_stage(
     student_i.train()
 
     # 2) Freeze all blocks deeper than stage_idx, using the ones in distilled_blocks[j]
-    for j in range(total_blocks, stage_idx, -1):
+    for j in range(total_blocks, stage_idx, -1): # NOTE: DA SISTEMARE
         block_j = distilled_blocks[j]  # must already exist
         setattr(student_i, f"block{j}", block_j)
+        freeze_module(getattr(student_i, f"block{j}"))
+    
+    # 3) Freeze all blocks shallower than stage_idx
+    for j in range(1, stage_idx):
         freeze_module(getattr(student_i, f"block{j}"))
 
     # 3) Build (or copy) the pruned version of block_i
@@ -343,8 +350,6 @@ def run_cbkd_stage(
 
     # 4) Unfreeze only pruned_block_i (and predictor if stage_idx == 4)
     unfreeze_module(pruned_block_i)
-    if stage_idx == total_blocks:
-        unfreeze_module(student_i.block4["predictor"])
 
     # 5) Build optimizer over exactly the trainable parameters
     no_decay       = ["bias", "layer_norm", "LayerNorm"]
@@ -352,11 +357,7 @@ def run_cbkd_stage(
     nodecay_params = []
 
     # Which parameters are trainable at this stage?
-    if stage_idx < total_blocks:
-        trainable_params = list(pruned_block_i.parameters())
-    else:  # stage_idx == 4
-        trainable_params = list(pruned_block_i.parameters()) \
-                         + list(student_i.block4["predictor"].parameters())
+    trainable_params = list(pruned_block_i.parameters())
 
     # Group them into “decay” vs “no_decay” as in AdamW
     for n, p in student_i.named_parameters():
@@ -375,117 +376,73 @@ def run_cbkd_stage(
         lr = getattr(cbkd_cfg, f"lr_block{stage_idx}")
     )
 
-    # 5.1) (Optional) Build a linear‐warmup scheduler if your CBKDConfig has warmup_proportion
-    #
-    # CBKDConfig as given did not include `warmup_proportion`, so if you truly want a
-    # scheduler you need to add that to your CBKDConfig. For example:
-    #    warmup_proportion: float = 0.1
-    # If you do add it, then:
-    #
+    # 5.1) Build a linear‐warmup scheduler
+
     num_steps = getattr(cbkd_cfg, f"epochs_block{stage_idx}") * len(train_loader)
     if hasattr(cbkd_cfg, "warmup_proportion"):
         scheduler = get_linear_schedule_with_warmup(
             optimizer,
-            num_warmup_steps = int(num_steps * cbkd_cfg.warmup_proportion),
+            num_warmup_steps = int(num_steps * configs.warmup_proportion),
             num_training_steps= num_steps
         )
     else:
         scheduler = None
 
     # 6) Training loop for this stage (head‐only CBKD)
+    global_step = 0
     for epoch in range(getattr(cbkd_cfg, f"epochs_block{stage_idx}")):
         student_i.train()
-        running_loss = 0.0
 
-        for (
-            word_ids,
-            char_ids,
-            video_features,
-            v_mask,
-            q_mask,
-            start_labels,
-            end_labels
-        ) in train_loader:
-            # Move everything to device
-            word_ids       = word_ids.to(device)
-            char_ids       = char_ids.to(device)
-            video_features = video_features.to(device)
-            v_mask         = v_mask.to(device)
-            q_mask         = q_mask.to(device)
-            start_labels   = start_labels.to(device)
-            end_labels     = end_labels.to(device)
-
-            optimizer.zero_grad()
+        for data in train_loader:
+            global_step += 1
+            (
+                _,
+                vfeats,
+                vfeat_lens,
+                word_ids,
+                char_ids,
+                s_labels,
+                e_labels,
+                h_labels,
+            ) = data
+            # prepare features
+            vfeats, vfeat_lens = vfeats.to(device), vfeat_lens.to(device)
+            s_labels, e_labels, h_labels = (
+                s_labels.to(device),
+                e_labels.to(device),
+                h_labels.to(device),
+            )
+            word_ids, char_ids = word_ids.to(device), char_ids.to(device)
+            # generate mask
+            query_mask = (
+                (torch.zeros_like(word_ids) != word_ids).float().to(device)
+            )
+            video_mask = convert_length_to_mask(vfeat_lens).to(device)
 
             # Forward through full student_i
             h_score, start_logits, end_logits = student_i(
-                word_ids, char_ids, video_features, v_mask, q_mask
+                word_ids, char_ids, vfeats, video_mask, query_mask
             )
 
             # Compute head‐only losses (highlight + start/end CE)
-            loss_hl = student_i.block3["highlight_layer"].compute_loss(
-                h_score, start_labels, v_mask
+            loc_loss = student_i.compute_loss(
+                start_logits, end_logits, s_labels, e_labels
             )
-            loss_se = student_i.block4["predictor"].compute_cross_entropy_loss(
-                start_logits, end_logits, start_labels, end_labels
+            highlight_loss = student_i.compute_highlight_loss(
+                h_score, h_labels, video_mask
             )
-            loss = loss_hl + loss_se
+            total_loss = loc_loss + configs.highlight_lambda * highlight_loss
 
-            loss.backward()
+            optimizer.zero_grad()
+            total_loss.backward()
+            nn.utils.clip_grad_norm_(
+                student_i.parameters(), configs.clip_norm
+            )  # clip gradient
             optimizer.step()
             if scheduler is not None:
                 scheduler.step()
 
-            running_loss += loss.item() * video_features.size(0)
-
-        epoch_loss = running_loss / len(train_loader.dataset)
-        print(
-            f"Stage {stage_idx}, Epoch {epoch+1}/{getattr(cbkd_cfg, f'epochs_block{stage_idx}')}, "
-            f"Train Loss: {epoch_loss:.4f}"
-        )
-
-        # ─── OPTIONAL VALIDATION PASS ───────────────────────────────────────
-        student_i.eval()
-        val_running_loss = 0.0
-
-        with torch.no_grad():
-            for (
-                word_ids,
-                char_ids,
-                video_features,
-                v_mask,
-                q_mask,
-                start_labels,
-                end_labels
-            ) in val_loader:
-                # Move to device
-                word_ids       = word_ids.to(device)
-                char_ids       = char_ids.to(device)
-                video_features = video_features.to(device)
-                v_mask         = v_mask.to(device)
-                q_mask         = q_mask.to(device)
-                start_labels   = start_labels.to(device)
-                end_labels     = end_labels.to(device)
-
-                h_score, start_logits, end_logits = student_i(
-                    word_ids, char_ids, video_features, v_mask, q_mask
-                )
-
-                # Same head‐only losses
-                loss_hl_v = student_i.block3["highlight_layer"].compute_loss(
-                    h_score, start_labels, v_mask
-                )
-                loss_se_v = student_i.block4["predictor"].compute_cross_entropy_loss(
-                    start_logits, end_logits, start_labels, end_labels
-                )
-                val_running_loss += (loss_hl_v + loss_se_v).item() * video_features.size(0)
-
-        val_epoch_loss = val_running_loss / len(val_loader.dataset)
-        print(
-            f"  → [Val] Epoch {epoch+1}/{getattr(cbkd_cfg, f'epochs_block{stage_idx}')} | "
-            f"Val Loss: {val_epoch_loss:.4f}\n"
-        )
-        student_i.train()
+        print(f"Stage {stage_idx}, Epoch {epoch+1}/{getattr(cbkd_cfg, f'epochs_block{stage_idx}')}")
 
     # 7) Freeze pruned_block_i before returning
     freeze_module(pruned_block_i)

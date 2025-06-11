@@ -8,6 +8,7 @@ import options
 import torch
 import torch.nn as nn
 import submitit
+from torch.utils.tensorboard.writer import SummaryWriter
 import nltk
 
 from NLQ.model.DeepVSLNet_cbkd import build_optimizer_and_scheduler, DeepVSLNet
@@ -56,9 +57,6 @@ def main(configs, parser):
         if dataset["val_set"] is None
         else get_test_loader(dataset["val_set"], visual_features, configs)
     )
-    test_loader = get_test_loader(
-        dataset=dataset["test_set"], video_features=visual_features, configs=configs
-    )
     configs.num_train_steps = len(train_loader) * configs.epochs
     num_train_batches = len(train_loader)
 
@@ -67,11 +65,49 @@ def main(configs, parser):
     device = torch.device(cuda_str if torch.cuda.is_available() else "cpu")
     print(f"Using device={device}")
 
+    # create model dir
+    home_dir = os.path.join(
+        configs.model_dir,
+        "_".join(
+            [
+                "shallow_vslnet",
+                configs.task,
+                configs.fv,
+                str(configs.max_pos_len),
+                configs.predictor,
+            ]
+        ),
+    )
+    if configs.suffix is not None:
+        home_dir = home_dir + "_" + configs.suffix
+    model_dir = os.path.join(home_dir, "model")
+
+    writer = None
+    if configs.log_to_tensorboard is not None:
+        log_dir = os.path.join(configs.tb_log_dir, configs.log_to_tensorboard)
+        os.makedirs(log_dir, exist_ok=True)
+        print(f"Writing to tensorboard: {log_dir}")
+        writer = SummaryWriter(log_dir=log_dir)
+
+    if not os.path.exists(model_dir):
+        os.makedirs(model_dir)
+    eval_period = num_train_batches // 2
+    save_json(
+        vars(configs),
+        os.path.join(model_dir, "configs.json"),
+        sort_keys=True,
+        save_pretty=True,
+    )
+
+    # build teacher model
     teacher = DeepVSLNet(
         configs=configs, word_vectors=dataset.get("word_vector", None)
     ).to(device)
-    # (Optionally load pretrained teacher checkpoint here)
-    # teacher.load_state_dict(torch.load(configs.teacher_ckpt_path))
+
+    # load pretrained teacher checkpoint here
+    model_dir_teacher = configs.model_dir_teacher
+    filename = get_last_checkpoint(model_dir_teacher, suffix="t7")
+    teacher.load_state_dict(torch.load(filename))
 
     # Bottom‐up Stage‐by‐stage distillation
     cbkd_config = CBKDConfig()
@@ -81,14 +117,14 @@ def main(configs, parser):
     student_i = None
     for stage_idx in [4, 3, 2, 1]:
         pruned_block_i, student_i = run_cbkd_stage(
-            teacher          = teacher,
-            distilled_blocks = distilled_blocks,
-            stage_idx        = stage_idx,
-            cbkd_cfg         = cbkd_config,   # renamed
-            train_loader     = train_loader,
-            val_loader       = val_loader,
-            total_blocks     = total_blocks,
-            device           = device
+            teacher           = teacher,
+            distilled_blocks  = distilled_blocks,
+            stage_idx         = stage_idx,
+            configs           = configs,
+            cbkd_cfg          = cbkd_config,   # renamed
+            train_loader      = train_loader,
+            total_blocks      = total_blocks,
+            device            = device
         )
         # Save the newly‐pruned block into our dict
         distilled_blocks[stage_idx] = pruned_block_i
@@ -102,94 +138,173 @@ def main(configs, parser):
         # Unfreeze every block and the predictor head
         for b_idx in range(1, total_blocks + 1):
             unfreeze_module(getattr(student_i, f"block{b_idx}"))
-        unfreeze_module(student_i.block4["predictor"])
 
-        # Build a new AdamW optimizer over _all_ parameters (with decay splitting)
-        no_decay       = ["bias", "layer_norm", "LayerNorm"]
-        decay_params   = []
-        nodecay_params = []
-        for n, p in student_i.named_parameters():
-            if any(nd in n for nd in no_decay):
-                nodecay_params.append(p)
-            else:
-                decay_params.append(p)
-
-        optimizer_ft = torch.optim.AdamW(
-            [
-                {"params": decay_params,   "weight_decay": 0.01},
-                {"params": nodecay_params, "weight_decay": 0.0}
-            ],
-            lr=cbkd_config.lr_finetune
-        )
-
-        # (Optional) If you want a scheduler in the thaw, add it here.
-        #       Otherwise, we skip scheduling and just train for the few epochs.
-        scheduler_ft = None
-        # total_steps_ft = cbkd_config.epochs_finetune * len(train_loader)
-        # scheduler_ft = get_linear_schedule_with_warmup(
-        #     optimizer_ft,
-        #     num_warmup_steps = int(total_steps_ft * cbkd_config.warmup_proportion),
-        #     num_training_steps= total_steps_ft
-        # )
+        optimizer, scheduler = build_optimizer_and_scheduler(model=student_i, configs=configs)
 
         # 3.4) Training loop for thawing stage (highlight + CE only)
+        best_metric = -1.0
+        score_writer = open(
+            os.path.join(model_dir, "eval_results.txt"), mode="w", encoding="utf-8"
+        )
+        print("start training...", flush=True)
+        global_step = 0
         for epoch in range(cbkd_config.epochs_finetune):
             student_i.train()
-            running_loss = 0.0
 
-            for (
-                word_ids,
-                char_ids,
-                video_features,
-                v_mask,
-                q_mask,
-                start_labels,
-                end_labels
-            ) in train_loader:
-                # Move batch to device
-                word_ids       = word_ids.to(device)
-                char_ids       = char_ids.to(device)
-                video_features = video_features.to(device)
-                v_mask         = v_mask.to(device)
-                q_mask         = q_mask.to(device)
-                start_labels   = start_labels.to(device)
-                end_labels     = end_labels.to(device)
-
-                optimizer_ft.zero_grad()
-
-                # Forward pass
+            for data in tqdm(
+                train_loader,
+                total=num_train_batches,
+                desc="Epoch %3d / %3d" % (epoch + 1, configs.epochs),
+            ):
+                global_step += 1
+                (
+                    _,
+                    vfeats,
+                    vfeat_lens,
+                    word_ids,
+                    char_ids,
+                    s_labels,
+                    e_labels,
+                    h_labels,
+                ) = data
+                # prepare features
+                vfeats, vfeat_lens = vfeats.to(device), vfeat_lens.to(device)
+                s_labels, e_labels, h_labels = (
+                    s_labels.to(device),
+                    e_labels.to(device),
+                    h_labels.to(device),
+                )
+                word_ids, char_ids = word_ids.to(device), char_ids.to(device)
+                # generate mask
+                query_mask = (
+                    (torch.zeros_like(word_ids) != word_ids).float().to(device)
+                )
+                # generate mask
+                video_mask = convert_length_to_mask(vfeat_lens).to(device)
+                # compute logits
+                
                 h_score, start_logits, end_logits = student_i(
-                    word_ids, char_ids, video_features, v_mask, q_mask
+                    word_ids, char_ids, vfeats, video_mask, query_mask
                 )
 
-                # Compute head‐only losses
-                loss_hl = student_i.block3["highlight_layer"].compute_loss(
-                    h_score, start_labels, v_mask
+                # compute loss
+                loc_loss = student_i.compute_loss(
+                    start_logits, end_logits, s_labels, e_labels
                 )
-                loss_se = student_i.block4["predictor"].compute_cross_entropy_loss(
-                    start_logits, end_logits, start_labels, end_labels
+
+                highlight_loss = student_i.compute_highlight_loss(
+                h_score, h_labels, video_mask
                 )
-                loss = loss_hl + loss_se
-                loss.backward()
-                optimizer_ft.step()
-                if scheduler_ft is not None:
-                    scheduler_ft.step()
+                total_loss = loc_loss + configs.highlight_lambda * highlight_loss
+                
+                # compute and apply gradients
+                optimizer.zero_grad()
+                total_loss.backward()
+                nn.utils.clip_grad_norm_(
+                    student_i.parameters(), configs.clip_norm
+                )  # clip gradient
+                optimizer.step()
+                scheduler.step()
+                
+                if writer is not None and global_step % configs.tb_log_freq == 0:
+                    writer.add_scalar("Loss/Total", total_loss.detach().cpu(), global_step)
+                    writer.add_scalar("Loss/Loc", loc_loss.detach().cpu(), global_step)
+                    writer.add_scalar("Loss/Highlight", highlight_loss.detach().cpu(), global_step)
+                    writer.add_scalar("Loss/Highlight (*lambda)", (configs.highlight_lambda * highlight_loss.detach().cpu()), global_step)
+                    writer.add_scalar("LR", optimizer.param_groups[0]["lr"], global_step)
+                
 
-                running_loss += loss.item() * video_features.size(0)
+                # evaluate
+                if (
+                    global_step % eval_period == 0
+                    or global_step % num_train_batches == 0
+                ):
+                    student_i.eval()
+                    print(
+                        f"\nEpoch: {epoch + 1:2d} | Step: {global_step:5d}", flush=True
+                    )
+                    result_save_path = os.path.join(
+                        model_dir,
+                        f"shallow_vslnet_{epoch}_{global_step}_preds.json",
+                    )
+                    # Evaluate on val, keep the top 3 checkpoints.
+                    results, mIoU, (score_str, score_dict) = eval_test(
+                        model=student_i,
+                        data_loader=val_loader,
+                        device=device,
+                        mode="val",
+                        epoch=epoch + 1,
+                        global_step=global_step,
+                        gt_json_path=configs.eval_gt_json,
+                        result_save_path=result_save_path,
+                        model_name="shallow_vslnet",
+                    )
+                    print(score_str, flush=True)
+                    if writer is not None:
+                        for name, value in score_dict.items():
+                            kk = name.replace("\n", " ")
+                            writer.add_scalar(f"Val/{kk}", value, global_step)
 
-            epoch_loss = running_loss / len(train_loader.dataset)
-            print(
-                f"[Thawing] Epoch {epoch+1}/{cbkd_config.epochs_finetune} | "
-                f"Loss: {epoch_loss:.4f}"
-            )
+                    score_writer.write(score_str)
+                    score_writer.flush()
+                    # Recall@1, 0.3 IoU overlap --> best metric.
+                    if results[0][0] >= best_metric:
+                        best_metric = results[0][0]
+                        torch.save(
+                            student_i.state_dict(),
+                            os.path.join(
+                                model_dir,
+                                f"shallow_vslnet_{global_step}.t7",
+                            ),
+                        )
+                        # only keep the top-3 model checkpoints
+                        filter_checkpoints(model_dir, suffix="t7", max_to_keep=3)
+                    student_i.train()
+            
+        score_writer.close()
 
-        # 3.5) Save the final student checkpoint
-        torch.save(student_i.state_dict(), cbkd_config.student_save_path)
-        print(f"\nFinal student model saved to {cbkd_config.student_save_path}\n")
+        # 3.5) Save the final student model and checkpoint
+        # Save weights only (state_dict)
+        torch.save(student_i.state_dict(), cbkd_config.student_weights_path)
+        print(f"\nFinal student weights saved to {cbkd_config.student_weights_path}\n")
+
+        # Save full scripted model (architecture + weights)
+        student_i.eval()  # switch to eval mode before scripting
+        scripted_student = torch.jit.script(student_i)
+        scripted_student.save(cbkd_config.student_scripted_path)
+        print(f"\nFinal student scripted model saved to {cbkd_config.student_scripted_path}\n")
 
     else:
         print("\nSkipping final Thawing Stage (cbkd_config.finetune_all=False)\n")
 
+def create_executor(configs):
+    executor = submitit.AutoExecutor(folder=configs.slurm_log_folder)
+
+    executor.update_parameters(
+        timeout_min=configs.slurm_timeout_min,
+        constraint=configs.slurm_constraint,
+        slurm_partition=configs.slurm_partition,
+        gpus_per_node=configs.slurm_gpus,
+        cpus_per_task=configs.slurm_cpus,
+    )
+    return executor
+
 if __name__ == "__main__":
+
+    nltk.download('punkt_tab')
+    nltk.download('punkt')
+    nltk.download('wordnet')
+    nltk.download('omw-1.4')
+
     configs, parser = options.read_command_line()
-    main(configs, parser)
+    if not configs.slurm:
+        main(configs, parser)
+    else:
+        executor = create_executor(configs)
+
+        job = executor.submit(main, configs, parser)
+        print("job=", job.job_id)
+
+        # wait for it
+        if configs.slurm_wait:
+            job.result()

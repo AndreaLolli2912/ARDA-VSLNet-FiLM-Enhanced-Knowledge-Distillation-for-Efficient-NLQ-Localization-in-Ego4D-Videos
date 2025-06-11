@@ -106,7 +106,7 @@ def main(configs, parser):
             model = VSLNet(
                 configs=configs, word_vectors=dataset.get("word_vector", None)
             ).to(device)
-        
+    
         elif configs.model_name == "vslbase":
             # print(f"{configs.model_name=}")
             model = VSLBase(
