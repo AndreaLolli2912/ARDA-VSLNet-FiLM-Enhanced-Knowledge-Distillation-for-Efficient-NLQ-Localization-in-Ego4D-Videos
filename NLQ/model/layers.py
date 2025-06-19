@@ -329,19 +329,27 @@ class FeatureEncoder(nn.Module):
         self.attention_block = MultiHeadAttentionBlock(
             dim=dim, num_heads=num_heads, drop_rate=drop_rate
         )
-        # Aggiungi FiLM
-        self.film_layer = FiLM(input_dim=dim, num_channels=dim)
 
-    def forward(self, x, mask=None, cond=None):
+        self.film_after_pos = FiLM(dim)
+        self.film_after_conv = FiLM(dim)
+        self.film_after_attn = FiLM(dim)
 
+    def forward(self, x, mask, query_feats=None, film_mode="off"):
         features = x + self.pos_embedding(x)  # (batch_size, seq_len, dim)
-        features = self.conv_block(features)  # (batch_size, seq_len, dim)
-        if cond is not None:
-            features = self.film_layer(features, cond)
+        
+        if film_mode in ["inside_encoder:after_pos", "inside_encoder:multi"]:
+            features = self.film_after_pos(features, query_feats)
 
-        features = self.attention_block(
-            features, mask=mask
-        )  # (batch_size, seq_len, dim)
+        features = self.conv_block(features)  # (batch_size, seq_len, dim)
+
+        if film_mode in ["inside_encoder:after_conv", "inside_encoder:multi"]:
+            features = self.film_after_conv(features, query_feats)
+
+        features = self.attention_block(features, mask=mask)  # (batch_size, seq_len, dim)
+
+        if film_mode in ["inside_encoder:after_attn", "inside_encoder:multi"]:
+            features = self.film_after_attn(features, query_feats)
+            
         return features
 
 
@@ -575,17 +583,43 @@ class ConditionedPredictor(nn.Module):
         end_loss = nn.CrossEntropyLoss(reduction="mean")(end_logits, end_labels)
         return start_loss + end_loss
 
-class FiLM(nn.Module):
-    def __init__(self, input_dim, num_channels):
-        super(FiLM, self).__init__()
-        self.gamma_layer = nn.Linear(input_dim, num_channels)
-        self.beta_layer = nn.Linear(input_dim, num_channels)
+import torch
+import torch.nn as nn
 
-    def forward(self, visual_feat, conditioning_feat):
+class FiLM(nn.Module):
+    """
+    A modular Feature-wise Linear Modulation (FiLM) layer that takes:
+    - conditioning input: query matrix [B, L_q, d]
+    - modulated input: video features [B, L_v, d]
+    It outputs FiLM-modulated video features of shape [B, L_v, d].
+    """
+    def __init__(self, dim, pooling='mean'):
+        super(FiLM, self).__init__()
+        self.dim = dim
+        self.pooling = pooling
+        self.film_generator = nn.Linear(dim, 2 * dim)
+
+    def forward(self, video_feats, query_feats, query_mask=None):  # query_mask unused
         """
-        visual_feat: [B, T, C]  (video features)
-        conditioning_feat: [B, C] (global query embedding)
+        video_feats: Tensor of shape [B, L_v, d]
+        query_feats: Tensor of shape [B, L_q, d]
         """
-        gamma = self.gamma_layer(conditioning_feat).unsqueeze(1)  # [B, 1, C]
-        beta = self.beta_layer(conditioning_feat).unsqueeze(1)    # [B, 1, C]
-        return gamma * visual_feat + beta
+        pooled_query = self.pool_query(query_feats)
+
+        # Generate FiLM parameters
+        gamma_beta = self.film_generator(pooled_query)  # [B, 2d]
+        gamma, beta = gamma_beta.chunk(2, dim=-1)       # each [B, d]
+
+        # Apply FiLM modulation
+        gamma = gamma.unsqueeze(1)  # [B, 1, d]
+        beta = beta.unsqueeze(1)    # [B, 1, d]
+
+        return gamma * video_feats + beta  # [B, L_v, d]
+
+    def pool_query(self, query_feats):
+        if self.pooling == 'mean':
+            return query_feats.mean(dim=1)  # simple mean pooling over L_q
+        elif self.pooling == 'cls':
+            return query_feats[:, 0, :]     # assumes CLS token at position 0
+        else:
+            raise ValueError(f"Unsupported pooling method: {self.pooling}")
