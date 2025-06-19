@@ -182,7 +182,7 @@ def main(configs, parser):
                 # generate mask
                 video_mask = convert_length_to_mask(vfeat_lens).to(device)
                 # compute logits
-                
+
                 h_score, start_logits, end_logits = student_i(
                     word_ids, char_ids, vfeats, video_mask, query_mask
                 )
@@ -196,7 +196,7 @@ def main(configs, parser):
                 h_score, h_labels, video_mask
                 )
                 total_loss = loc_loss + configs.highlight_lambda * highlight_loss
-                
+
                 # compute and apply gradients
                 optimizer.zero_grad()
                 total_loss.backward()
@@ -205,14 +205,13 @@ def main(configs, parser):
                 )  # clip gradient
                 optimizer.step()
                 scheduler.step()
-                
+
                 if writer is not None and global_step % configs.tb_log_freq == 0:
                     writer.add_scalar("Loss/Total", total_loss.detach().cpu(), global_step)
                     writer.add_scalar("Loss/Loc", loc_loss.detach().cpu(), global_step)
                     writer.add_scalar("Loss/Highlight", highlight_loss.detach().cpu(), global_step)
                     writer.add_scalar("Loss/Highlight (*lambda)", (configs.highlight_lambda * highlight_loss.detach().cpu()), global_step)
                     writer.add_scalar("LR", optimizer.param_groups[0]["lr"], global_step)
-                
 
                 # evaluate
                 if (
@@ -260,7 +259,7 @@ def main(configs, parser):
                         # only keep the top-3 model checkpoints
                         filter_checkpoints(model_dir, suffix="t7", max_to_keep=3)
                     student_i.train()
-            
+
         score_writer.close()
 
         # 3.5) Save the final student model and checkpoint

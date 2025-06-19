@@ -27,10 +27,10 @@ class CBKDConfig:
     lr_finetune: float = 2e-5 # LR for final “thaw-all” pass, if used
 
     # ── EPOCH COUNTS ────────────────────────────────────────────────────────────
-    epochs_block2: int = 5    # how many epochs to train just Block 2
-    epochs_block3: int = 5    # how many epochs to train just Block 3
-    epochs_block4: int = 8    # how many epochs to train just Block 4
-    epochs_finetune: int = 3  # how many epochs to fine-tune the entire student
+    epochs_block2: int = 1    # how many epochs to train just Block 2
+    epochs_block3: int = 1    # how many epochs to train just Block 3
+    epochs_block4: int = 1    # how many epochs to train just Block 4
+    epochs_finetune: int = 1  # how many epochs to fine-tune the entire student
 
     # ── OTHER TRAINING FLAGS ───────────────────────────────────────────────────
     finetune_all: bool = True # whether to run the final full‐model tuning step
