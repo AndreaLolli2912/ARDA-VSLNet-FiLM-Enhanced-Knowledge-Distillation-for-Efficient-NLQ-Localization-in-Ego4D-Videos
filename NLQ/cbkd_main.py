@@ -1,6 +1,6 @@
-"""Main script to train/test models for Ego4D NLQ dataset.
-"""
+"""Main entry point for knowledge distillation"""
 import argparse
+from copy import deepcopy
 import os
 from tqdm import tqdm
 import numpy as np
@@ -11,9 +11,13 @@ import submitit
 from torch.utils.tensorboard.writer import SummaryWriter
 import nltk
 
-from model.VSLNet import build_optimizer_and_scheduler, VSLNet
-from model.VSLBase import VSLBase
-from model.DeepVSLNet import DeepVSLNet
+from NLQ.model.DeepVSLNet_cbkd import build_optimizer_and_scheduler, DeepVSLNet
+from utils.cbkd_helpers import (
+    freeze_module,
+    unfreeze_module,
+    run_cbkd_stage
+)
+from utils.cbkd_config import CBKDConfig
 from utils.data_gen import gen_or_load_dataset
 from utils.data_loader import get_test_loader, get_train_loader
 from utils.data_util import load_json, load_video_features, save_json
@@ -24,7 +28,6 @@ from utils.runner_utils import (
     get_last_checkpoint,
     set_th_config,
 )
-
 
 def main(configs, parser):
     print(f"Running with {configs}", flush=True)
@@ -54,9 +57,6 @@ def main(configs, parser):
         if dataset["val_set"] is None
         else get_test_loader(dataset["val_set"], visual_features, configs)
     )
-    test_loader = get_test_loader(
-        dataset=dataset["test_set"], video_features=visual_features, configs=configs
-    )
     configs.num_train_steps = len(train_loader) * configs.epochs
     num_train_batches = len(train_loader)
 
@@ -70,7 +70,7 @@ def main(configs, parser):
         configs.model_dir,
         "_".join(
             [
-                configs.model_name,
+                "shallow_vslnet",
                 configs.task,
                 configs.fv,
                 str(configs.max_pos_len),
@@ -89,46 +89,68 @@ def main(configs, parser):
         print(f"Writing to tensorboard: {log_dir}")
         writer = SummaryWriter(log_dir=log_dir)
 
-    # train and test
-    if configs.mode.lower() == "train":
-        if not os.path.exists(model_dir):
-            os.makedirs(model_dir)
-        eval_period = num_train_batches // 2
-        save_json(
-            vars(configs),
-            os.path.join(model_dir, "configs.json"),
-            sort_keys=True,
-            save_pretty=True,
+    if not os.path.exists(model_dir):
+        os.makedirs(model_dir)
+    eval_period = num_train_batches // 2
+    save_json(
+        vars(configs),
+        os.path.join(model_dir, "configs.json"),
+        sort_keys=True,
+        save_pretty=True,
+    )
+
+    # build teacher model
+    teacher = DeepVSLNet(
+        configs=configs, word_vectors=dataset.get("word_vector", None)
+    ).to(device)
+
+    # load pretrained teacher checkpoint here
+    model_dir_teacher = configs.model_dir_teacher
+    filename = get_last_checkpoint(model_dir_teacher, suffix="t7")
+    teacher.load_state_dict(torch.load(filename))
+
+    # Bottom‐up Stage‐by‐stage distillation
+    cbkd_config = CBKDConfig()
+    distilled_blocks = {}
+    total_blocks    = 4
+
+    student_i = None
+    for stage_idx in [4, 3, 2, 1]:
+        pruned_block_i, student_i = run_cbkd_stage(
+            teacher           = teacher,
+            distilled_blocks  = distilled_blocks,
+            stage_idx         = stage_idx,
+            configs           = configs,
+            cbkd_cfg          = cbkd_config,   # renamed
+            train_loader      = train_loader,
+            total_blocks      = total_blocks,
+            device            = device
         )
-        # build model
-        if configs.model_name == "vslnet":
-            # print(f"{configs.model_name=}")
-            model = VSLNet(
-                configs=configs, word_vectors=dataset.get("word_vector", None)
-            ).to(device)
-    
-        elif configs.model_name == "vslbase":
-            # print(f"{configs.model_name=}")
-            model = VSLBase(
-                configs=configs, word_vectors=dataset.get("word_vector", None)
-            ).to(device)
+        # Save the newly‐pruned block into our dict
+        distilled_blocks[stage_idx] = pruned_block_i
 
-        elif configs.model_name == "deepvslnet":
-            # print(f"{configs.model_name=}")
-            model = DeepVSLNet(
-                configs=configs, word_vectors=dataset.get("word_vector", None)
-            ).to(device)
+    # At this point, `student_i` is the model after Stage 4.
+    # Block 1–4 are all pruned; Block 4 and predictor were just trained, others are frozen.
+    # Final “Thawing” Stage (Stage N+1)
+    if cbkd_config.finetune_all:
+        print("\n>>> Starting final Thawing Stage (unfreeze all blocks + predictor) <<<\n")
 
-        optimizer, scheduler = build_optimizer_and_scheduler(model, configs=configs)
-        # start training
+        # Unfreeze every block and the predictor head
+        for b_idx in range(1, total_blocks + 1):
+            unfreeze_module(getattr(student_i, f"block{b_idx}"))
+
+        optimizer, scheduler = build_optimizer_and_scheduler(model=student_i, configs=configs)
+
+        # 3.4) Training loop for thawing stage (highlight + CE only)
         best_metric = -1.0
         score_writer = open(
             os.path.join(model_dir, "eval_results.txt"), mode="w", encoding="utf-8"
         )
         print("start training...", flush=True)
         global_step = 0
-        for epoch in range(configs.epochs):
-            model.train()
+        for epoch in range(cbkd_config.epochs_finetune):
+            student_i.train()
+
             for data in tqdm(
                 train_loader,
                 total=num_train_batches,
@@ -152,87 +174,62 @@ def main(configs, parser):
                     e_labels.to(device),
                     h_labels.to(device),
                 )
-                if configs.predictor == "bert":
-                    # print(f"{configs.predictor=}")
-                    word_ids = {key: val.to(device) for key, val in word_ids.items()}
-                    # generate mask
-                    query_mask = (
-                        (
-                            torch.zeros_like(word_ids["input_ids"])
-                            != word_ids["input_ids"]
-                        )
-                        .float()
-                        .to(device)
-                    )
-                else:
-                    # print(f"{configs.predictor=}")
-                    word_ids, char_ids = word_ids.to(device), char_ids.to(device)
-                    # generate mask
-                    query_mask = (
-                        (torch.zeros_like(word_ids) != word_ids).float().to(device)
-                    )
+                word_ids, char_ids = word_ids.to(device), char_ids.to(device)
+                # generate mask
+                query_mask = (
+                    (torch.zeros_like(word_ids) != word_ids).float().to(device)
+                )
                 # generate mask
                 video_mask = convert_length_to_mask(vfeat_lens).to(device)
                 # compute logits
-                if configs.model_name in ["vslnet", "deepvslnet"]:
-                    h_score, start_logits, end_logits = model(
-                        word_ids, char_ids, vfeats, video_mask, query_mask
-                    )
-                elif configs.model_name == "vslbase":
-                    start_logits, end_logits = model(
-                        word_ids, char_ids, vfeats, video_mask, query_mask
-                    )
+                
+                h_score, start_logits, end_logits = student_i(
+                    word_ids, char_ids, vfeats, video_mask, query_mask
+                )
 
                 # compute loss
-                loc_loss = model.compute_loss(
+                loc_loss = student_i.compute_loss(
                     start_logits, end_logits, s_labels, e_labels
                 )
 
-                if configs.model_name in ["vslnet", "deepvslnet"]:
-                    highlight_loss = model.compute_highlight_loss(
-                    h_score, h_labels, video_mask
-                    )
-                    total_loss = loc_loss + configs.highlight_lambda * highlight_loss
-                elif configs.model_name == "vslbase":
-                    total_loss = loc_loss
+                highlight_loss = student_i.compute_highlight_loss(
+                h_score, h_labels, video_mask
+                )
+                total_loss = loc_loss + configs.highlight_lambda * highlight_loss
                 
                 # compute and apply gradients
                 optimizer.zero_grad()
                 total_loss.backward()
                 nn.utils.clip_grad_norm_(
-                    model.parameters(), configs.clip_norm
+                    student_i.parameters(), configs.clip_norm
                 )  # clip gradient
                 optimizer.step()
                 scheduler.step()
-                if configs.model_name in ["vslnet", "deepvslnet"]:
-                    if writer is not None and global_step % configs.tb_log_freq == 0:
-                        writer.add_scalar("Loss/Total", total_loss.detach().cpu(), global_step)
-                        writer.add_scalar("Loss/Loc", loc_loss.detach().cpu(), global_step)
-                        writer.add_scalar("Loss/Highlight", highlight_loss.detach().cpu(), global_step)
-                        writer.add_scalar("Loss/Highlight (*lambda)", (configs.highlight_lambda * highlight_loss.detach().cpu()), global_step)
-                        writer.add_scalar("LR", optimizer.param_groups[0]["lr"], global_step)
-                elif configs.model_name == "vslbase":
-                    if writer is not None and global_step % configs.tb_log_freq == 0:
-                        writer.add_scalar("Loss/Total", total_loss.detach().cpu(), global_step)
-                        writer.add_scalar("Loss/Loc", loc_loss.detach().cpu(), global_step)
-                        writer.add_scalar("LR", optimizer.param_groups[0]["lr"], global_step)
+                
+                if writer is not None and global_step % configs.tb_log_freq == 0:
+                    writer.add_scalar("Loss/Total", total_loss.detach().cpu(), global_step)
+                    writer.add_scalar("Loss/Loc", loc_loss.detach().cpu(), global_step)
+                    writer.add_scalar("Loss/Highlight", highlight_loss.detach().cpu(), global_step)
+                    writer.add_scalar("Loss/Highlight (*lambda)", (configs.highlight_lambda * highlight_loss.detach().cpu()), global_step)
+                    writer.add_scalar("LR", optimizer.param_groups[0]["lr"], global_step)
+                
 
                 # evaluate
                 if (
                     global_step % eval_period == 0
                     or global_step % num_train_batches == 0
                 ):
-                    model.eval()
+                    student_i.eval()
                     print(
                         f"\nEpoch: {epoch + 1:2d} | Step: {global_step:5d}", flush=True
                     )
                     result_save_path = os.path.join(
                         model_dir,
-                        f"{configs.model_name}_{epoch}_{global_step}_preds.json",
+                        f"shallow_vslnet_{epoch}_{global_step}_preds.json",
                     )
                     # Evaluate on val, keep the top 3 checkpoints.
                     results, mIoU, (score_str, score_dict) = eval_test(
-                        model=model,
+                        model=student_i,
                         data_loader=val_loader,
                         device=device,
                         mode="val",
@@ -240,7 +237,7 @@ def main(configs, parser):
                         global_step=global_step,
                         gt_json_path=configs.eval_gt_json,
                         result_save_path=result_save_path,
-                        model_name=configs.model_name,
+                        model_name="shallow_vslnet",
                     )
                     print(score_str, flush=True)
                     if writer is not None:
@@ -254,59 +251,31 @@ def main(configs, parser):
                     if results[0][0] >= best_metric:
                         best_metric = results[0][0]
                         torch.save(
-                            model.state_dict(),
+                            student_i.state_dict(),
                             os.path.join(
                                 model_dir,
-                                "{}_{}.t7".format(configs.model_name, global_step),
+                                f"shallow_vslnet_{global_step}.t7",
                             ),
                         )
                         # only keep the top-3 model checkpoints
                         filter_checkpoints(model_dir, suffix="t7", max_to_keep=3)
-                    model.train()
+                    student_i.train()
             
         score_writer.close()
 
-    elif configs.mode.lower() == "test":
-        if not os.path.exists(model_dir):
-            raise ValueError("No pre-trained weights exist")
-        # load previous configs
-        pre_configs = load_json(os.path.join(model_dir, "configs.json"))
-        parser.set_defaults(**pre_configs)
-        configs = parser.parse_args()
-        # build model
-        if configs.model_name == "vslnet":
-            # print(f"{configs.model_name=}")
-            model = VSLNet(
-                configs=configs, word_vectors=dataset.get("word_vector", None)
-            ).to(device)
-        
-        elif configs.model_name == "vslbase":
-            # print(f"{configs.model_name=}")
-            model = VSLBase(
-                configs=configs, word_vectors=dataset.get("word_vector", None)
-            ).to(device)
-        elif configs.model_name == "deepvslnet":
-            # print(f"{configs.model_name=}")
-            model = DeepVSLNet(
-                configs=configs, word_vectors=dataset.get("word_vector", None)
-            ).to(device)
-        
+        # 3.5) Save the final student model and checkpoint
+        # Save weights only (state_dict)
+        torch.save(student_i.state_dict(), cbkd_config.student_weights_path)
+        print(f"\nFinal student weights saved to {cbkd_config.student_weights_path}\n")
 
-        # get last checkpoint file
-        filename = get_last_checkpoint(model_dir, suffix="t7")
-        model.load_state_dict(torch.load(filename))
-        model.eval()
-        result_save_path = filename.replace(".t7", "_test_result.json")
-        results, mIoU, score_str = eval_test(
-            model=model,
-            data_loader=test_loader,
-            device=device,
-            mode="test",
-            result_save_path=result_save_path,
-            model_name=configs.model_name,
-        )
-        print(score_str, flush=True)
+        # Save full scripted model (architecture + weights)
+        student_i.eval()  # switch to eval mode before scripting
+        scripted_student = torch.jit.script(student_i)
+        scripted_student.save(cbkd_config.student_scripted_path)
+        print(f"\nFinal student scripted model saved to {cbkd_config.student_scripted_path}\n")
 
+    else:
+        print("\nSkipping final Thawing Stage (cbkd_config.finetune_all=False)\n")
 
 def create_executor(configs):
     executor = submitit.AutoExecutor(folder=configs.slurm_log_folder)
@@ -319,7 +288,6 @@ def create_executor(configs):
         cpus_per_task=configs.slurm_cpus,
     )
     return executor
-
 
 if __name__ == "__main__":
 

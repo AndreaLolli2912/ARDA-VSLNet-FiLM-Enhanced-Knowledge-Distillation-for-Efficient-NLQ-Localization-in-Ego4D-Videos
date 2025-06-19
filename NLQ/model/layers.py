@@ -583,9 +583,6 @@ class ConditionedPredictor(nn.Module):
         end_loss = nn.CrossEntropyLoss(reduction="mean")(end_logits, end_labels)
         return start_loss + end_loss
 
-import torch
-import torch.nn as nn
-
 class FiLM(nn.Module):
     """
     A modular Feature-wise Linear Modulation (FiLM) layer that takes:
