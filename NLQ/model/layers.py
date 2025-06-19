@@ -4,8 +4,8 @@ Layers to construct the VSLNet model.
 import math
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
+from torch import nn
+from torch.nn import functional as F
 
 
 def mask_logits(inputs, mask, mask_value=-1e30):
@@ -596,7 +596,7 @@ class FiLM(nn.Module):
         self.pooling = pooling
         self.film_generator = nn.Linear(dim, 2 * dim)
 
-    def forward(self, video_feats, query_feats, query_mask=None):  # query_mask unused
+    def forward(self, video_feats, query_feats):  # query_mask unused
         """
         video_feats: Tensor of shape [B, L_v, d]
         query_feats: Tensor of shape [B, L_q, d]
