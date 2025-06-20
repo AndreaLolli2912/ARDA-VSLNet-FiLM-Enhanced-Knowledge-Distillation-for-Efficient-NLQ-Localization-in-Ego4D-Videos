@@ -123,23 +123,23 @@ class DeepVSLNet(nn.Module):
     def forward(self, word_ids, char_ids, video_features, v_mask, q_mask):
         video_features = self.video_affine(video_features)
         if self.configs.predictor == "bert":
-            query_features_pre = self.embedding_net(word_ids)
-            query_features_pre = self.query_affine(query_features_pre)
+            query_features = self.embedding_net(word_ids)
+            query_features = self.query_affine(query_features)
         else:
-            query_features_pre = self.embedding_net(word_ids, char_ids)
+            query_features = self.embedding_net(word_ids, char_ids)
 
         # FiLM before feature encoder
         if self.configs.film_mode == "before_encoder":
-            video_features = self.linear_modulation(video_features, query_features_pre)
+            video_features = self.linear_modulation(video_features, query_features)
 
         # Encode query
-        query_features = self.feature_encoder(query_features_pre, mask=q_mask)
+        query_features = self.feature_encoder(query_features, mask=q_mask)
 
         # Encode video
         video_features = self.feature_encoder(
             video_features,
             mask=v_mask,
-            query_feats=query_features_pre,
+            query_feats=query_features,
             film_mode=self.configs.film_mode
         )
         
