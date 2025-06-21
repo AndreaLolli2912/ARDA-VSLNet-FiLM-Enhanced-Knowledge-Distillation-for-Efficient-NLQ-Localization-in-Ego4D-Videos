@@ -144,7 +144,7 @@ class TeacherVSLNetCBDK(nn.Module):
 
         # ─── Block 1 ────────────────────────────────────────────────────────────
         video_features = self.block1["video_affine"](video_features)
-        query_features = self.block1["embedding_net"](word_ids)
+        query_features = self.block1["embedding_net"](word_ids, char_ids)
         query_features = self.block1["query_affine"](query_features)
         
         # ─── Block 2 ────────────────────────────────────────────────────────────
