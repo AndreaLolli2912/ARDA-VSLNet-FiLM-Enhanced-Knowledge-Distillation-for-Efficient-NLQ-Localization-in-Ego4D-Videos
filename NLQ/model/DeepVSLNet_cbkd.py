@@ -63,9 +63,6 @@ class TeacherVSLNetCBDK(nn.Module):
             drop_rate=configs.drop_rate,
         )
 
-        # Project BERT’s 768→hidden dim (initialized here, but will skip reinit)
-        self.query_affine = nn.Linear(768, configs.dim)
-
         # Instantiate the BERT embedding (frozen inside BertEmbedding)
         self.embedding_net = Embedding(
             num_words=configs.word_size,
@@ -108,7 +105,6 @@ class TeacherVSLNetCBDK(nn.Module):
         self.block1 = nn.ModuleDict({
             "video_affine":   self.video_affine,
             "embedding_net":  self.embedding_net,
-            "query_affine":   self.query_affine,
         })
 
         self.block2 = nn.ModuleDict({
@@ -146,11 +142,15 @@ class TeacherVSLNetCBDK(nn.Module):
         # ─── Block 1 ────────────────────────────────────────────────────────────
         video_features = self.block1["video_affine"](video_features)
         query_features = self.block1["embedding_net"](word_ids, char_ids)
-        query_features = self.block1["query_affine"](query_features)
         
         # ─── Block 2 ────────────────────────────────────────────────────────────
         query_features = self.block2["feature_encoder"](query_features, mask=q_mask)
-        video_features = self.block2["feature_encoder"](video_features, mask=v_mask)
+        video_features = self.block2["feature_encoder"](
+            video_features, 
+            mask=v_mask,
+            query_feats=query_features,
+            film_mode=self.configs.film_mode
+        )
 
         # ─── Block 3 ────────────────────────────────────────────────────────────
         features = self.block3["cq_attention"](video_features, query_features, v_mask, q_mask)
