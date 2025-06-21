@@ -102,7 +102,6 @@ class TeacherVSLNetCBDK(nn.Module):
             predictor=configs.predictor,
         )
 
-        # ─── Now that all submodules (including BERT) are defined, initialize non‐BERT weights
         self.init_parameters()
 
         # ─── Group layers into explicit blocks for CBKD ─────────────────────────
@@ -127,24 +126,18 @@ class TeacherVSLNetCBDK(nn.Module):
         })
 
     def init_parameters(self):
-        """init parameters that's it"""
-        # Gather every module under self.embedding_net.embedder
-        bert_modules = set(self.embedding_net.embedder.modules())
-
         def init_weights(m):
-            # If this module is part of the pretrained BERT, skip it:
-            if m in bert_modules:
-                return
-
-            # Otherwise, initialize your newly added layers:
-            if isinstance(m, (nn.Conv1d, nn.Conv2d, nn.Linear)):
-                nn.init.xavier_uniform_(m.weight)
+            if (
+                isinstance(m, nn.Conv2d)
+                or isinstance(m, nn.Conv1d)
+                or isinstance(m, nn.Linear)
+            ):
+                torch.nn.init.xavier_uniform_(m.weight)
                 if m.bias is not None:
-                    nn.init.zeros_(m.bias)
+                    torch.nn.init.zeros_(m.bias)
             elif isinstance(m, nn.LSTM):
                 m.reset_parameters()
 
-        # Apply init_weights to every submodule in the network
         self.apply(init_weights)
 
     def forward(self, word_ids, char_ids, video_features, v_mask, q_mask):
