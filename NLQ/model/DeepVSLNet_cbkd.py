@@ -67,7 +67,15 @@ class TeacherVSLNetCBDK(nn.Module):
         self.query_affine = nn.Linear(768, configs.dim)
 
         # Instantiate the BERT embedding (frozen inside BertEmbedding)
-        self.embedding_net = BertEmbedding(configs.text_agnostic)
+        self.embedding_net = Embedding(
+            num_words=configs.word_size,
+            num_chars=configs.char_size,
+            out_dim=configs.dim,
+            word_dim=configs.word_dim,
+            char_dim=configs.char_dim,
+            word_vectors=word_vectors,
+            drop_rate=configs.drop_rate,
+        )
 
 
         # ─── Block 2 layers ───────────────────────────────────────────────────
