@@ -50,9 +50,9 @@ def build_optimizer_and_scheduler(model, configs):
     return optimizer, scheduler
 
 
-class DeepVSLNet(nn.Module):
+class TeacherVSLNetCBDK(nn.Module):
     def __init__(self, configs, word_vectors):
-        super(DeepVSLNet, self).__init__()
+        super(TeacherVSLNetCBDK, self).__init__()
         self.configs = configs
 
         # ─── Block 1 layers ───────────────────────────────────────────────────
@@ -119,6 +119,7 @@ class DeepVSLNet(nn.Module):
         })
 
     def init_parameters(self):
+        """init parameters that's it"""
         # Gather every module under self.embedding_net.embedder
         bert_modules = set(self.embedding_net.embedder.modules())
 
@@ -139,6 +140,7 @@ class DeepVSLNet(nn.Module):
         self.apply(init_weights)
 
     def forward(self, word_ids, char_ids, video_features, v_mask, q_mask):
+        """Forward as it is"""
 
         # ─── Block 1 ────────────────────────────────────────────────────────────
         video_features = self.block1["video_affine"](video_features)

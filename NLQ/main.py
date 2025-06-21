@@ -14,6 +14,7 @@ import nltk
 from model.VSLNet import build_optimizer_and_scheduler, VSLNet
 from model.VSLBase import VSLBase
 from model.DeepVSLNet import DeepVSLNet
+from model.DeepVSLNet_cbkd import TeacherVSLNetCBDK
 from utils.data_gen import gen_or_load_dataset
 from utils.data_loader import get_test_loader, get_train_loader
 from utils.data_util import load_json, load_video_features, save_json
@@ -118,6 +119,10 @@ def main(configs, parser):
             model = DeepVSLNet(
                 configs=configs, word_vectors=dataset.get("word_vector", None)
             ).to(device)
+        elif configs.model_name == "teacher_cbkd":
+            model = TeacherVSLNetCBDK(
+                configs=configs, word_vectors=dataset.get("word_vector", None)
+            ).to(device)
 
         optimizer, scheduler = build_optimizer_and_scheduler(model, configs=configs)
         # start training
@@ -174,7 +179,7 @@ def main(configs, parser):
                 # generate mask
                 video_mask = convert_length_to_mask(vfeat_lens).to(device)
                 # compute logits
-                if configs.model_name in ["vslnet", "deepvslnet"]:
+                if configs.model_name in ["vslnet", "deepvslnet", "teacher_cbkd"]:
                     h_score, start_logits, end_logits = model(
                         word_ids, char_ids, vfeats, video_mask, query_mask
                     )
@@ -188,7 +193,7 @@ def main(configs, parser):
                     start_logits, end_logits, s_labels, e_labels
                 )
 
-                if configs.model_name in ["vslnet", "deepvslnet"]:
+                if configs.model_name in ["vslnet", "deepvslnet", "teacher_cbkd"]:
                     highlight_loss = model.compute_highlight_loss(
                     h_score, h_labels, video_mask
                     )
@@ -204,7 +209,7 @@ def main(configs, parser):
                 )  # clip gradient
                 optimizer.step()
                 scheduler.step()
-                if configs.model_name in ["vslnet", "deepvslnet"]:
+                if configs.model_name in ["vslnet", "deepvslnet", "teacher_cbkd"]:
                     if writer is not None and global_step % configs.tb_log_freq == 0:
                         writer.add_scalar("Loss/Total", total_loss.detach().cpu(), global_step)
                         writer.add_scalar("Loss/Loc", loc_loss.detach().cpu(), global_step)
@@ -289,6 +294,10 @@ def main(configs, parser):
             # print(f"{configs.model_name=}")
             model = DeepVSLNet(
                 configs=configs, word_vectors=dataset.get("word_vector", None)
+            ).to(device)
+        elif configs.model_name == "teacher_cbkd":
+            model = TeacherVSLNetCBDK(
+                configs=configs, word_vectors=dataset.get("word_vectors", None)
             ).to(device)
         
 
