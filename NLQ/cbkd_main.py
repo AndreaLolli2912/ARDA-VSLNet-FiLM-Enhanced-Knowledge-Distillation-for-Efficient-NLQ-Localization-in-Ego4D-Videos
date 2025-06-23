@@ -11,7 +11,7 @@ import submitit
 from torch.utils.tensorboard.writer import SummaryWriter
 import nltk
 
-from NLQ.model.DeepVSLNet_cbkd import build_optimizer_and_scheduler, TeacherVSLNetCBDK
+from model.DeepVSLNet_cbkd import build_optimizer_and_scheduler, TeacherVSLNetCBDK
 from utils.cbkd_helpers import (
     freeze_module,
     unfreeze_module,
