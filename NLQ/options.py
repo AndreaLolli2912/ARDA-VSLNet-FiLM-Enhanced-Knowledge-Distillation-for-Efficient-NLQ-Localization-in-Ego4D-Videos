@@ -95,7 +95,7 @@ def read_command_line():
         type=str,
         default="/content/nlq_official_v1_teacher/checkpoints/egovlp_fp16/model",
         help="path to teacher checkpoints"
-    )
+    )
     # training/evaluation parameters
     parser.add_argument("--gpu_idx", type=str, default="0", help="GPU index")
     parser.add_argument("--seed", type=int, default=12345, help="random seed")
