@@ -11,7 +11,7 @@ import submitit
 from torch.utils.tensorboard.writer import SummaryWriter
 import nltk
 
-from NLQ.model.DeepVSLNet_cbkd import build_optimizer_and_scheduler, DeepVSLNet
+from NLQ.model.DeepVSLNet_cbkd import build_optimizer_and_scheduler, TeacherVSLNetCBDK
 from utils.cbkd_helpers import (
     freeze_module,
     unfreeze_module,
@@ -100,7 +100,7 @@ def main(configs, parser):
     )
 
     # build teacher model
-    teacher = DeepVSLNet(
+    teacher = TeacherVSLNetCBDK(
         configs=configs, word_vectors=dataset.get("word_vector", None)
     ).to(device)
 
@@ -264,13 +264,15 @@ def main(configs, parser):
 
         # 3.5) Save the final student model and checkpoint
         # Save weights only (state_dict)
-        torch.save(student_i.state_dict(), cbkd_config.student_weights_path)
-        print(f"\nFinal student weights saved to {cbkd_config.student_weights_path}\n")
+        # torch.save(student_i.state_dict(), cbkd_config.student_weights_path)
+        # print(f"\nFinal student weights saved to {cbkd_config.student_weights_path}\n")
+
+        torch.save(student_i.state_dict(), "content/prova")
 
         # Save full scripted model (architecture + weights)
         student_i.eval()  # switch to eval mode before scripting
         scripted_student = torch.jit.script(student_i)
-        scripted_student.save(cbkd_config.student_scripted_path)
+        scripted_student.save("content/prova")
         print(f"\nFinal student scripted model saved to {cbkd_config.student_scripted_path}\n")
 
     else:
