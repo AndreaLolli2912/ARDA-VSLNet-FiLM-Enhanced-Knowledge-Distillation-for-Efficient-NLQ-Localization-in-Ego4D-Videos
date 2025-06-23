@@ -4,10 +4,10 @@ from copy import deepcopy
 import torch
 from torch import nn
 from transformers import get_linear_schedule_with_warmup
-from NLQ.utils.runner_utils import convert_length_to_mask
-from NLQ.utils.cbkd_config import CBKDConfig
-from NLQ.model.DeepVSLNet_cbkd import DeepVSLNet
-from NLQ.model.layers import DepthwiseSeparableConvBlock
+from utils.runner_utils import convert_length_to_mask
+from utils.cbkd_config import CBKDConfig
+from model.DeepVSLNet_cbkd import TeacherVSLNetCBDK
+from model.layers import DepthwiseSeparableConvBlock
 
 def freeze_module(module: nn.Module):
     """
@@ -262,7 +262,7 @@ def prune_block4(
     return pruned_block4
 
 def run_cbkd_stage(
-    teacher: DeepVSLNet,
+    teacher: TeacherVSLNetCBDK,
     distilled_blocks: dict,
     stage_idx: int,
     configs: Namespace,
