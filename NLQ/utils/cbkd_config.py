@@ -9,18 +9,20 @@ class CBKDConfig:
 
     # ── KEEP RATIOS ────────────────────────────────────────────────────────────
     # Block 2: ~25% parameter reduction → keep 75% channels internally
-    keep_ratio_block2_ds:    float = 0.4
-    keep_ratio_block2_attn:  float = 0.4
+    keep_ratio_block2_ds:    float = 0.30
+    keep_ratio_block2_attn:  float = 0.37
 
     # Block 3: ~50% parameter reduction → keep 50% channels internally
-    keep_ratio_block3_cqa:    float = 0.1
-    keep_ratio_block3_concat: float = 0.25
+    keep_ratio_block3_cqa:    float = 0.111
+    keep_ratio_block3_concat: float = 0.2
 
     # Block 4: ~75% parameter reduction → keep 25% channels internally
-    keep_ratio_block4_enc:   float = 0.01
-    keep_ratio_block4_pred:  float = 0.05
+    keep_ratio_block4_enc:   float = 0.001
+
+    keep_ratio_block4_pred:  float = 0.001
 
     # ── LEARNING RATES ──────────────────────────────────────────────────────────
+    lr_block1: float = 1e-4
     lr_block2: float = 1e-4   # LR for distilling (pruned) Block 2
     lr_block3: float = 5e-5   # LR for distilling Block 3
     lr_block4: float = 5e-5   # LR for distilling Block 4

@@ -311,6 +311,7 @@ def run_cbkd_stage(
     
     # 3) Freeze all blocks shallower than stage_idx
     for j in range(1, stage_idx):
+        print(j)
         freeze_module(getattr(student_i, f"block{j}"))
 
     # 3) Build (or copy) the pruned version of block_i
@@ -321,7 +322,8 @@ def run_cbkd_stage(
             keep_ratio_enc  = cbkd_cfg.keep_ratio_block4_enc,
             keep_ratio_pred = cbkd_cfg.keep_ratio_block4_pred
         ).to(device)
-
+        
+    
     elif stage_idx == 3:
         orig_block3 = teacher.block3
         pruned_block_i = prune_block3(
@@ -345,24 +347,33 @@ def run_cbkd_stage(
     else:
         raise ValueError(f"Invalid stage_idx {stage_idx}. Must be in [1..{total_blocks}].")
 
+    
     # 3.1) Insert the pruned block_i into student_i
     setattr(student_i, f"block{stage_idx}", pruned_block_i)
-
+    
     # 4) Unfreeze only pruned_block_i (and predictor if stage_idx == 4)
     unfreeze_module(pruned_block_i)
+    
 
     # 5) Build optimizer over exactly the trainable parameters
     no_decay       = ["bias", "layer_norm", "LayerNorm"]
     decay_params   = []
     nodecay_params = []
 
+    
     # Which parameters are trainable at this stage?
     trainable_params = list(pruned_block_i.parameters())
 
+    prefix = f"block{stage_idx}."
+
     # Group them into “decay” vs “no_decay” as in AdamW
     for n, p in student_i.named_parameters():
-        if p not in trainable_params:
-            continue
+        if not n.startswith(prefix):
+            continue  # skip params outside the current pruned block
+        
+        if not p.requires_grad:
+            continue  # skip frozen params
+
         if any(nd in n for nd in no_decay):
             nodecay_params.append(p)
         else:
