@@ -3,6 +3,7 @@ from argparse import Namespace
 from copy import deepcopy
 import torch
 from torch import nn
+from torch.nn import ModuleDict
 from transformers import get_linear_schedule_with_warmup
 from utils.runner_utils import convert_length_to_mask
 from utils.cbkd_config import CBKDConfig
@@ -132,7 +133,7 @@ def make_pruned_conv1d(orig_conv: nn.Conv1d, keep_ratio: float) -> nn.Sequential
     return nn.Sequential(adapter_down, pruned_conv, adapter_up)
 
 def prune_block2(
-    teacher_featenc: nn.Module,
+    encoder_block2: nn.Module,
     keep_ratio_ds: float,
     keep_ratio_attn: float
 ) -> nn.Module:
@@ -154,8 +155,7 @@ def prune_block2(
     """
 
     # 1) Deep‐copy
-    pruned_featenc = deepcopy(teacher_featenc)
-
+    pruned_featenc = deepcopy(encoder_block2)
     # ── A) Prune the DS block ─────────────────────────────────────────────────
     orig_ds = pruned_featenc.conv_block  # DepthwiseSeparableConvBlock(dim=128,…)
     pruned_ds = make_pruned_ds_block(orig_ds, keep_ratio=keep_ratio_ds)
@@ -168,7 +168,7 @@ def prune_block2(
         orig_conv  = orig_layer.conv1d         # nn.Conv1d(128→128)
         pruned_conv = make_pruned_conv1d(orig_conv, keep_ratio=keep_ratio_attn)
         setattr(orig_layer, "conv1d", pruned_conv)
-    
+
     return pruned_featenc
 
 def prune_block3(
@@ -228,7 +228,7 @@ def prune_block4(
     """
     # 1) Deep‐copy so we don’t touch the teacher directly
     pruned_block4 = deepcopy(teacher_block4)
-    predictor_mod = pruned_block4["predictor"]
+    predictor_mod = pruned_block4.predictor
 
     # ── A) Prune the internal FeatureEncoder inside ConditionedPredictor ───────
     #    (This is exactly the same logic as Block 2’s prune_block2, except we use
@@ -333,12 +333,14 @@ def run_cbkd_stage(
         ).to(device)
 
     elif stage_idx == 2:
-        orig_block2 = teacher.block2["feature_encoder"]
+        orig_block2 = teacher.block2
+        encoder_block2 = orig_block2["feature_encoder"]
         pruned_block_i = prune_block2(
-            orig_block2,
+            encoder_block2,
             keep_ratio_ds   = cbkd_cfg.keep_ratio_block2_ds,
             keep_ratio_attn = cbkd_cfg.keep_ratio_block2_attn
         ).to(device)
+        pruned_block_i = ModuleDict({"feature_encoder": pruned_block_i})
 
     elif stage_idx == 1:
         # CBKD does not prune Block1—just copy it verbatim
