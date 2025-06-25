@@ -36,8 +36,7 @@ class WordEmbedding(nn.Module):
     def __init__(self, num_words, word_dim, drop_rate, word_vectors=None):
         super(WordEmbedding, self).__init__()
         self.is_pretrained = False if word_vectors is None else True
-        # dummy creation for supporting jip.script
-        self.word_emb = nn.Embedding(num_words, word_dim, padding_idx=0)
+        
         if self.is_pretrained:
             self.pad_vec = nn.Parameter(
                 torch.zeros(size=(1, word_dim), dtype=torch.float32),
