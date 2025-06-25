@@ -60,7 +60,8 @@ def main(configs, parser):
     # test_loader = get_test_loader(
     #     dataset=dataset["test_set"], video_features=visual_features, configs=configs
     # )
-    configs.num_train_steps = len(train_loader) * configs.epochs
+    cbkd_config = CBKDConfig()
+    configs.num_train_steps = len(train_loader) * cbkd_config.epochs_finetune
     num_train_batches = len(train_loader)
 
     # Device configuration
@@ -113,11 +114,10 @@ def main(configs, parser):
         teacher.load_state_dict(torch.load(filename))
 
         # Bottom‐up Stage‐by‐stage distillation
-        cbkd_config      = CBKDConfig()
-        distilled_blocks = {}
-        total_blocks     = 4
-
         student_i = None
+        total_blocks = 4
+        distilled_blocks = {}
+        
         for stage_idx in [4, 3, 2, 1]:
             pruned_block_i, student_i = run_cbkd_stage(
                 teacher           = teacher,
@@ -153,7 +153,7 @@ def main(configs, parser):
             for data in tqdm(
                 train_loader,
                 total=num_train_batches,
-                desc="Epoch %3d / %3d" % (epoch + 1, configs.epochs),
+                desc="Epoch %3d / %3d" % (epoch + 1, cbkd_config.epochs_finetune),
             ):
                 global_step += 1
                 (
