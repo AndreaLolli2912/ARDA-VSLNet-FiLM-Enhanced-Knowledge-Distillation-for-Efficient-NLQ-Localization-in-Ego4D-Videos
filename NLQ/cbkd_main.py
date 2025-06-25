@@ -140,7 +140,9 @@ def main(configs, parser):
         unfreeze_module(getattr(student_i, f"block{b_idx}"))
 
     optimizer, scheduler = build_optimizer_and_scheduler(model=student_i, configs=configs)
-
+    print(student_i.block2, flush=True)
+    print(student_i.block3, flush=True)
+    print(student_i.block4, flush=True)
     # 3.4) Training loop for thawing stage (highlight + CE only)
     best_metric = -1.0
     score_writer = open(

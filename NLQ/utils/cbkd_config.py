@@ -22,9 +22,9 @@ class CBKDConfig:
     keep_ratio_block4_pred:  float = 0.001
 
     # ── LEARNING RATES ──────────────────────────────────────────────────────────
-    lr_block2: float = 0.0001
-    lr_block3: float = 0.0001
-    lr_block4: float = 0.0001
+    lr_block2: float = 0.0005
+    lr_block3: float = 0.0005
+    lr_block4: float = 0.0005
     lr_finetune: float = 0.0005
 
     # ── EPOCH COUNTS ────────────────────────────────────────────────────────────
