@@ -341,10 +341,6 @@ def run_cbkd_stage(
         ).to(device)
         pruned_block_i = ModuleDict({"feature_encoder": pruned_block_i})
 
-    elif stage_idx == 1:
-        # CBKD does not prune Block1—just copy it verbatim
-        pruned_block_i = deepcopy(teacher.block1).to(device)
-
     else:
         raise ValueError(f"Invalid stage_idx {stage_idx}. Must be in [1..{total_blocks}].")
 
