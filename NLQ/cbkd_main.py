@@ -269,12 +269,12 @@ def main(configs, parser):
                 )
             )
             # Save full scripted model (architecture + weights)
-            student_i.eval()  # switch to eval mode before scripting
-            scripted_student = torch.jit.script(student_i)
+            # student_i.eval()  # switch to eval mode before scripting
+            # scripted_student = torch.jit.script(student_i)
 
-            scripted_student.save(
-                os.path.join(model_dir, f"architecture_{configs.model_name}.pt"),
-            )
+            # scripted_student.save(
+            #     os.path.join(model_dir, f"architecture_{configs.model_name}.pt"),
+            # )
 
 def create_executor(configs):
     executor = submitit.AutoExecutor(folder=configs.slurm_log_folder)
