@@ -57,6 +57,9 @@ def main(configs, parser):
         if dataset["val_set"] is None
         else get_test_loader(dataset["val_set"], visual_features, configs)
     )
+    # test_loader = get_test_loader(
+    #     dataset=dataset["test_set"], video_features=visual_features, configs=configs
+    # )
     configs.num_train_steps = len(train_loader) * configs.epochs
     num_train_batches = len(train_loader)
 
@@ -70,7 +73,7 @@ def main(configs, parser):
         configs.model_dir,
         "_".join(
             [
-                "shallow_vslnet",
+                configs.model_name,
                 configs.task,
                 configs.fv,
                 str(configs.max_pos_len),
@@ -89,51 +92,48 @@ def main(configs, parser):
         print(f"Writing to tensorboard: {log_dir}")
         writer = SummaryWriter(log_dir=log_dir)
 
-    if not os.path.exists(model_dir):
-        os.makedirs(model_dir)
-    eval_period = num_train_batches // 2
-    save_json(
-        vars(configs),
-        os.path.join(model_dir, "configs.json"),
-        sort_keys=True,
-        save_pretty=True,
-    )
-
-    # build teacher model
-    teacher = TeacherVSLNetCBDK(
-        configs=configs, word_vectors=dataset.get("word_vector", None)
-    ).to(device)
-
-    # load pretrained teacher checkpoint here
-    model_dir_teacher = configs.model_dir_teacher
-    filename = get_last_checkpoint(model_dir_teacher, suffix="t7")
-    teacher.load_state_dict(torch.load(filename))
-
-    # Bottom‐up Stage‐by‐stage distillation
-    cbkd_config = CBKDConfig()
-    distilled_blocks = {}
-    total_blocks    = 4
-
-    student_i = None
-    for stage_idx in [4, 3, 2, 1]:
-        pruned_block_i, student_i = run_cbkd_stage(
-            teacher           = teacher,
-            distilled_blocks  = distilled_blocks,
-            stage_idx         = stage_idx,
-            configs           = configs,
-            cbkd_cfg          = cbkd_config,   # renamed
-            train_loader      = train_loader,
-            total_blocks      = total_blocks,
-            device            = device
+    # train and test
+    if configs.mode.lower() == "train":
+        if not os.path.exists(model_dir):
+            os.makedirs(model_dir)
+        eval_period = num_train_batches // 2
+        save_json(
+            vars(configs),
+            os.path.join(model_dir, "configs.json"),
+            sort_keys=True,
+            save_pretty=True,
         )
-        # Save the newly‐pruned block into our dict
-        distilled_blocks[stage_idx] = pruned_block_i
+        # build teacher model
+        teacher = TeacherVSLNetCBDK(
+            configs=configs, word_vectors=dataset.get("word_vector", None)
+        ).to(device)
+        # load pretrained teacher checkpoint here
+        model_dir_teacher = configs.model_dir_teacher
+        filename = get_last_checkpoint(model_dir_teacher, suffix="t7")
+        teacher.load_state_dict(torch.load(filename))
 
-    # At this point, `student_i` is the model after Stage 4.
-    # Block 1–4 are all pruned; Block 4 and predictor were just trained, others are frozen.
-    # Final “Thawing” Stage (Stage N+1)
-    if cbkd_config.finetune_all:
-        print("\n>>> Starting final Thawing Stage (unfreeze all blocks + predictor) <<<\n")
+        # Bottom‐up Stage‐by‐stage distillation
+        cbkd_config      = CBKDConfig()
+        distilled_blocks = {}
+        total_blocks     = 4
+
+        student_i = None
+        for stage_idx in [4, 3, 2, 1]:
+            pruned_block_i, student_i = run_cbkd_stage(
+                teacher           = teacher,
+                distilled_blocks  = distilled_blocks,
+                stage_idx         = stage_idx,
+                configs           = configs,
+                cbkd_cfg          = cbkd_config,
+                train_loader      = train_loader,
+                total_blocks      = total_blocks,
+                device            = device
+            )
+            # Save the newly‐pruned block into our dict
+            distilled_blocks[stage_idx] = pruned_block_i
+
+        # Final “Thawing” Stage (Stage N+1)
+        print(">>> Starting final Thawing Stage (unfreeze all blocks + predictor) <<<", flush=True)
 
         # Unfreeze every block and the predictor head
         for b_idx in range(1, total_blocks + 1):
@@ -150,7 +150,6 @@ def main(configs, parser):
         global_step = 0
         for epoch in range(cbkd_config.epochs_finetune):
             student_i.train()
-
             for data in tqdm(
                 train_loader,
                 total=num_train_batches,
@@ -182,7 +181,6 @@ def main(configs, parser):
                 # generate mask
                 video_mask = convert_length_to_mask(vfeat_lens).to(device)
                 # compute logits
-
                 h_score, start_logits, end_logits = student_i(
                     word_ids, char_ids, vfeats, video_mask, query_mask
                 )
@@ -191,9 +189,8 @@ def main(configs, parser):
                 loc_loss = student_i.compute_loss(
                     start_logits, end_logits, s_labels, e_labels
                 )
-
                 highlight_loss = student_i.compute_highlight_loss(
-                h_score, h_labels, video_mask
+                    h_score, h_labels, video_mask
                 )
                 total_loss = loc_loss + configs.highlight_lambda * highlight_loss
 
@@ -224,7 +221,7 @@ def main(configs, parser):
                     )
                     result_save_path = os.path.join(
                         model_dir,
-                        f"shallow_vslnet_{epoch}_{global_step}_preds.json",
+                        f"{configs.model_name}_{epoch}_{global_step}_preds.json",
                     )
                     # Evaluate on val, keep the top 3 checkpoints.
                     results, mIoU, (score_str, score_dict) = eval_test(
@@ -236,7 +233,7 @@ def main(configs, parser):
                         global_step=global_step,
                         gt_json_path=configs.eval_gt_json,
                         result_save_path=result_save_path,
-                        model_name="shallow_vslnet",
+                        model_name=configs.model_name,
                     )
                     print(score_str, flush=True)
                     if writer is not None:
@@ -260,23 +257,20 @@ def main(configs, parser):
                         filter_checkpoints(model_dir, suffix="t7", max_to_keep=3)
                     student_i.train()
 
-        score_writer.close()
+            score_writer.close()
 
-        # 3.5) Save the final student model and checkpoint
-        # Save weights only (state_dict)
-        # torch.save(student_i.state_dict(), cbkd_config.student_weights_path)
-        # print(f"\nFinal student weights saved to {cbkd_config.student_weights_path}\n")
+            # 3.5) Save the final student model and checkpoint
+            # Save weights only (state_dict)
+            # torch.save(student_i.state_dict(), cbkd_config.student_weights_path)
+            # print(f"\nFinal student weights saved to {cbkd_config.student_weights_path}\n")
 
-        torch.save(student_i.state_dict(), "content/prova")
+            torch.save(student_i.state_dict(), "content/prova_pesi")
 
-        # Save full scripted model (architecture + weights)
-        student_i.eval()  # switch to eval mode before scripting
-        scripted_student = torch.jit.script(student_i)
-        scripted_student.save("content/prova")
-        print(f"\nFinal student scripted model saved to {cbkd_config.student_scripted_path}\n")
-
-    else:
-        print("\nSkipping final Thawing Stage (cbkd_config.finetune_all=False)\n")
+            # Save full scripted model (architecture + weights)
+            student_i.eval()  # switch to eval mode before scripting
+            scripted_student = torch.jit.script(student_i)
+            scripted_student.save("content/prova_modello")
+            print(f"\nFinal student scripted model saved to {cbkd_config.student_scripted_path}\n")
 
 def create_executor(configs):
     executor = submitit.AutoExecutor(folder=configs.slurm_log_folder)

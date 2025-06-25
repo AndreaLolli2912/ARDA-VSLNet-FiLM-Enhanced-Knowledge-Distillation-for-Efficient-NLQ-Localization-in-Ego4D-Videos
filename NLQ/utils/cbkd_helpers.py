@@ -311,7 +311,6 @@ def run_cbkd_stage(
     
     # 3) Freeze all blocks shallower than stage_idx
     for j in range(1, stage_idx):
-        print(j)
         freeze_module(getattr(student_i, f"block{j}"))
 
     # 3) Build (or copy) the pruned version of block_i
@@ -356,12 +355,10 @@ def run_cbkd_stage(
     # 4) Unfreeze only pruned_block_i (and predictor if stage_idx == 4)
     unfreeze_module(pruned_block_i)
     
-
     # 5) Build optimizer over exactly the trainable parameters
     no_decay       = ["bias", "layer_norm", "LayerNorm"]
     decay_params   = []
     nodecay_params = []
-
     
     # Which parameters are trainable at this stage?
     trainable_params = list(pruned_block_i.parameters())
@@ -390,7 +387,6 @@ def run_cbkd_stage(
     )
 
     # 5.1) Build a linear‐warmup scheduler
-
     num_steps = getattr(cbkd_cfg, f"epochs_block{stage_idx}") * len(train_loader)
     if hasattr(cbkd_cfg, "warmup_proportion"):
         scheduler = get_linear_schedule_with_warmup(
