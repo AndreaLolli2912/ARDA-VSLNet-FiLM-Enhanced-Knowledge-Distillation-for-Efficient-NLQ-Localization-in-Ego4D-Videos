@@ -30,7 +30,7 @@ class CBKDConfig:
     # ── EPOCH COUNTS ────────────────────────────────────────────────────────────
     epochs_block2: int = 30
     epochs_block3: int = 15
-    epochs_block4: int = 5
+    epochs_block4: int = 15 
     epochs_finetune: int = 30
 
     # ── OTHER TRAINING FLAGS ───────────────────────────────────────────────────
