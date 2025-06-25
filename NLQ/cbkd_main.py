@@ -250,7 +250,7 @@ def main(configs, parser):
                             student_i.state_dict(),
                             os.path.join(
                                 model_dir,
-                                f"shallow_vslnet_{global_step}.t7",
+                                f"{configs.model_name}_{global_step}.t7",
                             ),
                         )
                         # only keep the top-3 model checkpoints
@@ -261,16 +261,20 @@ def main(configs, parser):
 
             # 3.5) Save the final student model and checkpoint
             # Save weights only (state_dict)
-            # torch.save(student_i.state_dict(), cbkd_config.student_weights_path)
-            # print(f"\nFinal student weights saved to {cbkd_config.student_weights_path}\n")
-
-            torch.save(student_i.state_dict(), "content/prova_pesi")
-
+            torch.save(
+                student_i.state_dict(),
+                os.path.join(
+                    model_dir,
+                    f"{configs.model_name}._{global_step}.t7",
+                )
+            )
             # Save full scripted model (architecture + weights)
             student_i.eval()  # switch to eval mode before scripting
             scripted_student = torch.jit.script(student_i)
-            scripted_student.save("content/prova_modello")
-            print(f"\nFinal student scripted model saved to {cbkd_config.student_scripted_path}\n")
+
+            scripted_student.save(
+                os.path.join(model_dir, f"architecture_{configs.model_name}.pt"),
+            )
 
 def create_executor(configs):
     executor = submitit.AutoExecutor(folder=configs.slurm_log_folder)
