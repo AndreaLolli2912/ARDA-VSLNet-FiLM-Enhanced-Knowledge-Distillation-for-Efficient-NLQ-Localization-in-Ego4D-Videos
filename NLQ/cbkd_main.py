@@ -118,7 +118,7 @@ def main(configs, parser):
     total_blocks = 4
     distilled_blocks = {}
     
-    for stage_idx in [4, 3, 2]:
+    for stage_idx in [4]:
         pruned_block_i, student_i = run_cbkd_stage(
             teacher           = teacher,
             distilled_blocks  = distilled_blocks,
