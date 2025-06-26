@@ -16,7 +16,7 @@ class CBKDConfig:
     keep_ratio_block3_cqa:    float = 0.111
     keep_ratio_block3_concat: float = 0.2
 
-    # Block 4: ~75% parameter reduction → keep 25% channels internally
+    # Block 4: ~50% parameter reduction → keep 50% channels internally
     keep_ratio_block4_enc:   float = 0.05
     keep_ratio_block4_pred:  float = 0.05
 
