@@ -17,9 +17,8 @@ class CBKDConfig:
     keep_ratio_block3_concat: float = 0.2
 
     # Block 4: ~75% parameter reduction → keep 25% channels internally
-    keep_ratio_block4_enc:   float = 0.001
-
-    keep_ratio_block4_pred:  float = 0.001
+    keep_ratio_block4_enc:   float = 0.1
+    keep_ratio_block4_pred:  float = 0.1
 
     # ── LEARNING RATES ──────────────────────────────────────────────────────────
     lr_block2: float = 0.0005
@@ -30,7 +29,7 @@ class CBKDConfig:
     # ── EPOCH COUNTS ────────────────────────────────────────────────────────────
     epochs_block2: int = 30
     epochs_block3: int = 15
-    epochs_block4: int = 15 
+    epochs_block4: int = 40 
     epochs_finetune: int = 30
 
     # ── OTHER TRAINING FLAGS ───────────────────────────────────────────────────
