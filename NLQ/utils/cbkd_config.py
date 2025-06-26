@@ -27,7 +27,7 @@ class CBKDConfig:
     lr_finetune: float = 0.0005
 
     # ── EPOCH COUNTS ────────────────────────────────────────────────────────────
-    epochs_block2: int = 30
+    epochs_block2: int = 15
     epochs_block3: int = 15
     epochs_block4: int = 30
     epochs_finetune: int = 30
