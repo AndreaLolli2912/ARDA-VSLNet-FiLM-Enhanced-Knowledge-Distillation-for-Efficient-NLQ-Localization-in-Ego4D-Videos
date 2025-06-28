@@ -30,6 +30,20 @@ class Conv1D(nn.Module):
         x = x.transpose(1, 2)  # (batch_size, dim, seq_len)
         x = self.conv1d(x)
         return x.transpose(1, 2)  # (batch_size, seq_len, dim)
+    
+class Conv1DReLU(nn.Module):
+    def __init__(self, conv1d_module: Conv1D):
+        super().__init__()
+        assert isinstance(conv1d_module, Conv1D)
+        self.conv1d = conv1d_module.conv1d  # use the actual nn.Conv1d
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        # Apply Conv1D.forward logic manually
+        x = x.transpose(1, 2)
+        x = self.conv1d(x)
+        x = self.relu(x)
+        return x.transpose(1, 2)
 
 
 class WordEmbedding(nn.Module):
