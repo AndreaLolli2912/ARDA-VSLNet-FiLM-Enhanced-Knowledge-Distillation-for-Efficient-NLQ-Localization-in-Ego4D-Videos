@@ -12,8 +12,6 @@ from model.layers import (
     CQConcatenate,
     ConditionedPredictor,
     HighLightLayer,
-    BertEmbedding,
-    FiLM,
 )
 
 
@@ -49,77 +47,61 @@ def build_optimizer_and_scheduler(model, configs):
     )
     return optimizer, scheduler
 
-
 class TeacherVSLNetCBDK(nn.Module):
+    """TeacherVSLNetCBKD"""
     def __init__(self, configs, word_vectors):
         super(TeacherVSLNetCBDK, self).__init__()
         self.configs = configs
 
         # ─── Block 1 layers ───────────────────────────────────────────────────
-        # Project raw video features into hidden dimension
-        self.video_affine = VisualProjection(
-            visual_dim=configs.video_feature_dim,
-            dim=configs.dim,
-            drop_rate=configs.drop_rate,
-        )
-
-        # Instantiate the BERT embedding (frozen inside BertEmbedding)
-        self.embedding_net = Embedding(
-            num_words=configs.word_size,
-            num_chars=configs.char_size,
-            out_dim=configs.dim,
-            word_dim=configs.word_dim,
-            char_dim=configs.char_dim,
-            word_vectors=word_vectors,
-            drop_rate=configs.drop_rate,
-        )
-
+        self.block1 = nn.ModuleDict({
+            "video_affine": VisualProjection(
+                visual_dim=configs.video_feature_dim,
+                dim=configs.dim,
+                drop_rate=configs.drop_rate,
+            ),
+            "embedding_net":  Embedding(
+                num_words=configs.word_size,
+                num_chars=configs.char_size,
+                out_dim=configs.dim,
+                word_dim=configs.word_dim,
+                char_dim=configs.char_dim,
+                word_vectors=word_vectors,
+                drop_rate=configs.drop_rate,
+            ),
+        })
 
         # ─── Block 2 layers ───────────────────────────────────────────────────
-        self.feature_encoder = FeatureEncoder(
-            dim=configs.dim,
-            num_heads=configs.num_heads,
-            kernel_size=7,
-            num_layers=4,
-            max_pos_len=configs.max_pos_len,
-            drop_rate=configs.drop_rate,
-        )
+        self.block2 = nn.ModuleDict({
+            "feature_encoder": FeatureEncoder(
+                dim=configs.dim,
+                num_heads=configs.num_heads,
+                kernel_size=7,
+                num_layers=4,
+                max_pos_len=configs.max_pos_len,
+                drop_rate=configs.drop_rate,
+            ),
+        })
 
         # ─── Block 3 layers ───────────────────────────────────────────────────
-        self.cq_attention   = CQAttention(dim=configs.dim, drop_rate=configs.drop_rate)
-        self.cq_concat      = CQConcatenate(dim=configs.dim)
-        self.highlight_layer = HighLightLayer(dim=configs.dim)
+        self.block3 = nn.ModuleDict({
+            "cq_attention":    CQAttention(dim=configs.dim, drop_rate=configs.drop_rate),
+            "cq_concat":       CQConcatenate(dim=configs.dim),
+            "highlight_layer": HighLightLayer(dim=configs.dim),
+        })
 
         # ─── Block 4 layers ───────────────────────────────────────────────────
-        self.predictor = ConditionedPredictor(
-            dim=configs.dim,
-            num_heads=configs.num_heads,
-            drop_rate=configs.drop_rate,
-            max_pos_len=configs.max_pos_len,
-            predictor=configs.predictor,
-        )
+        self.block4 = nn.ModuleDict({
+            "predictor": ConditionedPredictor(
+                dim=configs.dim,
+                num_heads=configs.num_heads,
+                drop_rate=configs.drop_rate,
+                max_pos_len=configs.max_pos_len,
+                predictor=configs.predictor,
+            ),
+        })
 
         self.init_parameters()
-
-        # ─── Group layers into explicit blocks for CBKD ─────────────────────────
-        self.block1 = nn.ModuleDict({
-            "video_affine":   self.video_affine,
-            "embedding_net":  self.embedding_net,
-        })
-
-        self.block2 = nn.ModuleDict({
-            "feature_encoder": self.feature_encoder,
-        })
-
-        self.block3 = nn.ModuleDict({
-            "cq_attention":    self.cq_attention,
-            "cq_concat":       self.cq_concat,
-            "highlight_layer": self.highlight_layer,
-        })
-
-        self.block4 = nn.ModuleDict({
-            "predictor": self.predictor,
-        })
 
     def init_parameters(self):
         def init_weights(m):
