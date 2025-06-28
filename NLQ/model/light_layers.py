@@ -4,8 +4,8 @@ Layers to construct the VSLNet model.
 import math
 
 import torch
-from torch import nn
-from torch.nn import functional as F
+import torch.nn as nn
+import torch.nn.functional as F
 
 
 def mask_logits(inputs, mask, mask_value=-1e30):
@@ -36,7 +36,6 @@ class WordEmbedding(nn.Module):
     def __init__(self, num_words, word_dim, drop_rate, word_vectors=None):
         super(WordEmbedding, self).__init__()
         self.is_pretrained = False if word_vectors is None else True
-        
         if self.is_pretrained:
             self.pad_vec = nn.Parameter(
                 torch.zeros(size=(1, word_dim), dtype=torch.float32),
@@ -318,7 +317,7 @@ class MultiHeadAttentionBlock(nn.Module):
 
 class FeatureEncoder(nn.Module):
     def __init__(
-        self, dim, num_heads, max_pos_len, kernel_size=7, num_layers=4, drop_rate=0.0
+        self, dim, num_heads, max_pos_len, kernel_size=7, num_layers=1, drop_rate=0.0
     ):
         super(FeatureEncoder, self).__init__()
         self.pos_embedding = PositionalEmbedding(
@@ -596,7 +595,7 @@ class FiLM(nn.Module):
         self.pooling = pooling
         self.film_generator = nn.Linear(dim, 2 * dim)
 
-    def forward(self, video_feats, query_feats):  # query_mask unused
+    def forward(self, video_feats, query_feats, query_mask=None):  # query_mask unused
         """
         video_feats: Tensor of shape [B, L_v, d]
         query_feats: Tensor of shape [B, L_q, d]

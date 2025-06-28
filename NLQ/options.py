@@ -12,6 +12,12 @@ def read_command_line():
     parser = argparse.ArgumentParser()
     # data parameters
     parser.add_argument(
+        "--model_dir_teacher",
+        type=str,
+        default="/content/nlq_official_v1_teacher/checkpoints/egovlp_fp16/model",
+        help="path to teacher checkpoints"
+    )
+    parser.add_argument(
         "--save_dir",
         type=str,
         default="datasets",
@@ -66,6 +72,7 @@ def read_command_line():
         help="character dimension, set to 100 for activitynet",
     )
     parser.add_argument("--dim", type=int, default=128, help="hidden size")
+    parser.add_argument("--dim_student", type=int, default=64, help="hidden size")
     parser.add_argument(
         "--film_mode",
         type=str,
@@ -85,7 +92,21 @@ def read_command_line():
         default=5.0,
         help="lambda for highlight region",
     )
+    parser.add_argument(
+        "--film_mode",
+        type=str,
+        default="before_encoder",
+        choices=[
+            "before_encoder", 
+            "after_encoder",
+            "inside_encoder:after_pos", 
+            "inside_encoder:after_conv", 
+            "inside_encoder:after_attn",
+            "inside_encoder:multi",
+            "off"
+    ])
     parser.add_argument("--num_heads", type=int, default=8, help="number of heads")
+    parser.add_argument("--num_heads_student", type=int, default=2, help="number of heads")
     parser.add_argument("--drop_rate", type=float, default=0.2, help="dropout rate")
     parser.add_argument(
         "--predictor", type=str, default="rnn", help="[rnn | transformer]"
@@ -140,6 +161,9 @@ def read_command_line():
         default="checkpoints",
         help="path to save trained model weights",
     )
+    parser.add_argument("--feature_map_weight", type=float, default=0.25)
+    parser.add_argument("--ce_loss_weight", type=float, default=0.75)
+    parser.add_argument("--distill_weight_loss", type=float, default=0.2)
     parser.add_argument("--model_name", type=str, default="vslnet", help="[vslnet | vslbase] model name")  # noqa
     parser.add_argument(
         "--suffix",

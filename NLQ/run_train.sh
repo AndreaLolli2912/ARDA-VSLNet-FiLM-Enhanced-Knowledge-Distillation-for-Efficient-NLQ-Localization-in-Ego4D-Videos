@@ -10,7 +10,7 @@ CUDA_VISIBLE_DEVICES=1 python main.py \
     --fv official \
     --num_workers 64 \
     --model_dir checkpoints/ \
-    --eval_gt_json "data/nlq_val.json"
+    --eval_gt_json "data/nlq_val.json" 
 
 
 # To predict on test set.
