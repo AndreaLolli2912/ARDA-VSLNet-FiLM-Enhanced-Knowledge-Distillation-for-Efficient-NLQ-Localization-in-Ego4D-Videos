@@ -98,6 +98,12 @@ def main(configs, parser):
     model = DeepVSLNet(
         configs=configs, word_vectors=dataset.get("word_vector", None)
     ).to(device)
+
+    # load weights
+    model_dir_teacher = configs.model_dir_teacher
+    filename = get_last_checkpoint(model_dir_teacher, suffix="t7")
+    model.load_state_dict(torch.load(filename))
+
     optimizer, scheduler = build_optimizer_and_scheduler(model, configs=configs)
     
     # quantization
