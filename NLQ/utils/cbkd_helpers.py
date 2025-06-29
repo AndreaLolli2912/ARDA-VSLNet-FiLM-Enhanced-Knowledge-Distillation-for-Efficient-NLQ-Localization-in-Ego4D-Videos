@@ -313,7 +313,7 @@ def run_cbkd_stage(
     for j in range(1, stage_idx):
         freeze_module(getattr(student_i, f"block{j}"))
 
-    # 3) Build (or copy) the pruned version of block_i
+    # 4) Build (or copy) the pruned version of block_i
     if stage_idx == 4:
         orig_block4 = teacher.block4
         pruned_block_i = prune_block4(
