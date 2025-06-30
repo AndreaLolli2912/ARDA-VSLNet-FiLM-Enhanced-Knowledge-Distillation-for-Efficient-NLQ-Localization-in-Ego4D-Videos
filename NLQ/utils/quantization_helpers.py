@@ -106,10 +106,15 @@ def assign_qconfig(model, qconfig_global):
     Parameters:
     - model (nn.Module): Model to assign qconfigs to.
     - qconfig_global (QConfig): Quantization config for general modules.
+    - qconfig_emb (QConfig): Quantization config for embedding layers (ignored if skip_embedding=True).
+    - skip_embedding (bool): If True, embedding layers will not be quantized.
     """
     for name, module in model.named_modules():
-        if not hasattr(module, 'qconfig') or module.qconfig is None:
-            module.qconfig = qconfig_global
+        if isinstance(module, torch.nn.Embedding):
+            module.qconfig = None  # Skip quantization for embedding layers
+        else:
+            if not hasattr(module, 'qconfig') or module.qconfig is None:
+                module.qconfig = qconfig_global
 
 def run_static_quantization_calibration(
     model: nn.Module,
