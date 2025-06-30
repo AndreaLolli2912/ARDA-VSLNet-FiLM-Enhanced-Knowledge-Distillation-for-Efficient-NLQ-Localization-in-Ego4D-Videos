@@ -193,7 +193,7 @@ def apply_post_training_static_quantization(
 
     # 2. Define qconfigs
     qconfig_global = QConfig(
-        activation=MinMaxObserver.with_args(dtype=torch.qint8),
+        activation=MinMaxObserver.with_args(dtype=torch.quint8),
         weight=default_observer.with_args(dtype=torch.qint8)
     )
     qconfig_emb = float_qparams_weight_only_qconfig
