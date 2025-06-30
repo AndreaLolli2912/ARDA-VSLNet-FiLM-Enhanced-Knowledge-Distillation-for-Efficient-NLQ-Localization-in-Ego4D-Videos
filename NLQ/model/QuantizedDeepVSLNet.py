@@ -58,15 +58,16 @@ class QuantizedDeepVSLNet(nn.Module):
 
         self.query_quant = QuantStub()
         self.video_quant = QuantStub()
-
         self.dequant = DeQuantStub()
 
         self.video_affine = base_model.video_affine
+        self.embedding_net = base_model.embedding_net
+        self.feature_encoder = base_model.feature_encoder
         self.cq_attention = base_model.cq_attention
         self.cq_concat = base_model.cq_concat
         self.highlight_layer = base_model.highlight_layer
         self.predictor = base_model.predictor
-        self.embedding_net = base_model.embedding_net
+        
 
         self.init_parameters()
 
