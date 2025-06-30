@@ -110,7 +110,7 @@ def main(configs, parser):
     model = apply_post_training_static_quantization(
         float_model=model,
         calibration_loader=train_loader,
-        num_calibration_batches=100
+        num_calibration_batches=500
     )
 
     score_writer = open(
