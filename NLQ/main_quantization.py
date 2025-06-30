@@ -104,7 +104,7 @@ def main(configs, parser):
     model = apply_post_training_static_quantization(
         float_model=model,
         calibration_loader=train_loader,
-        num_calibration_batches=500
+        num_calibration_batches=100
     )
 
     score_writer = open(
@@ -141,7 +141,7 @@ def main(configs, parser):
         model.state_dict(),
         os.path.join(
             model_dir,
-            "{}_{}.t7".format(configs.model_name, 0),
+            f"{configs.model_name}_quantized_weights.t7",
         ),
     )
     model.train()
