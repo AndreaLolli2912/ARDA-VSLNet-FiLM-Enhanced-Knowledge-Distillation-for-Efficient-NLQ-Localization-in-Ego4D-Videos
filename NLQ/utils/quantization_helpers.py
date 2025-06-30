@@ -9,7 +9,6 @@ from torch.ao.quantization.observer import default_observer
 
 from model.layers import Conv1D, Conv1DReLU
 from model.QuantizedDeepVSLNet import QuantizedDeepVSLNet
-
 from utils.runner_utils import convert_length_to_mask
 
 def fuse_sequential_block(
