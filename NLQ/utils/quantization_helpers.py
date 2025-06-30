@@ -99,24 +99,17 @@ def fuse_model(model, inplace=False):
     model_copy.predictor = fuse_conditioned_predictor(model_copy.predictor, inplace=inplace)
     return model_copy
 
-def assign_qconfig(model, qconfig_global, qconfig_emb):
+def assign_qconfig(model, qconfig_global):
     """
     Assigns quantization configurations to model modules.
-
-    Embedding layers get the embedding-specific qconfig.
-    All other modules get the global qconfig unless already assigned.
 
     Parameters:
     - model (nn.Module): Model to assign qconfigs to.
     - qconfig_global (QConfig): Quantization config for general modules.
-    - qconfig_emb (QConfig): Quantization config for embedding layers.
     """
     for name, module in model.named_modules():
-        if isinstance(module, torch.nn.Embedding):
-            module.qconfig = qconfig_emb
-        else:
-            if not hasattr(module, 'qconfig') or module.qconfig is None:
-                module.qconfig = qconfig_global
+        if not hasattr(module, 'qconfig') or module.qconfig is None:
+            module.qconfig = qconfig_global
 
 def run_static_quantization_calibration(
     model: nn.Module,
@@ -166,7 +159,7 @@ def run_static_quantization_calibration(
 def apply_post_training_static_quantization(
         float_model: torch.nn.Module,
         calibration_loader: torch.utils.data.DataLoader,
-        num_calibration_batches: int
+        num_calibration_batches: int,
 ) -> torch.nn.Module:
     """
     Applies post-training static quantization to a floating-point model.
@@ -175,6 +168,7 @@ def apply_post_training_static_quantization(
     - float_model (nn.Module): Pretrained float model to quantize.
     - calibration_loader (DataLoader): Data loader for calibration dataset.
     - num_calibration_batches (int): Number of batches for calibration.
+    - skip_embedding (bool): If True, embedding layers will not be quantized.
 
     Returns:
     - quantized_model (nn.Module): Quantized model ready for inference.
@@ -185,19 +179,12 @@ def apply_post_training_static_quantization(
     # 1: Fuse modules to improve quantization efficiency
     fused_model = fuse_model(float_model)
 
-    # 2. Define qconfigs
-    # qconfig_global = QConfig(
-    #     activation=MinMaxObserver.with_args(dtype=torch.quint8),
-    #     weight=default_observer.with_args(dtype=torch.qint8)
-    # )
-    # qconfig_emb = float_qparams_weight_only_qconfig
     # 2. Use default qconfigs that are guaranteed to work with FBGEMM
     qconfig_global = torch.ao.quantization.get_default_qconfig('fbgemm')
-    qconfig_emb = float_qparams_weight_only_qconfig
 
     # 3. Create quantization-ready wrapper and assign qconfigs
     quant_ready_model = QuantizedDeepVSLNet(fused_model)
-    assign_qconfig(quant_ready_model, qconfig_global, qconfig_emb)
+    assign_qconfig(quant_ready_model, qconfig_global)
     torch.ao.quantization.prepare(quant_ready_model, inplace=True)
 
     # 4: Calibrate observers with calibration data

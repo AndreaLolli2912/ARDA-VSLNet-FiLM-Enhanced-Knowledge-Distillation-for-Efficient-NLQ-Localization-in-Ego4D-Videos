@@ -56,8 +56,8 @@ class QuantizedDeepVSLNet(nn.Module):
         super().__init__()
         self.configs = base_model.configs
 
-        self.query_quant = QuantStub()
         self.video_quant = QuantStub()
+        self.query_quant = QuantStub()
         self.dequant = DeQuantStub()
 
         self.video_affine = base_model.video_affine
@@ -72,7 +72,9 @@ class QuantizedDeepVSLNet(nn.Module):
         
         video_features = self.video_quant(video_features)
         video_features = self.video_affine(video_features)
-        query_features = self.query_quant(self.embedding_net(word_ids, char_ids))
+        
+        query_features = self.embedding_net(word_ids, char_ids)
+        query_features = self.query_quant(query_features)
 
         query_features = self.feature_encoder(query_features, mask=q_mask)
 
