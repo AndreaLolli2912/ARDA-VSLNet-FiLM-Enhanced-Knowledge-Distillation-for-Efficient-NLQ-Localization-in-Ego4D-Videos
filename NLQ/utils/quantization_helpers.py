@@ -171,12 +171,6 @@ def apply_post_training_static_quantization(
     """
     Applies post-training static quantization to a floating-point model.
 
-    Workflow:
-    1. Fuse supported layers (e.g., Conv+BatchNorm+ReLU).
-    2. Assign quantization configs and insert observers.
-    3. Run calibration using representative data.
-    4. Convert model to quantized version.
-
     Parameters:
     - float_model (nn.Module): Pretrained float model to quantize.
     - calibration_loader (DataLoader): Data loader for calibration dataset.
