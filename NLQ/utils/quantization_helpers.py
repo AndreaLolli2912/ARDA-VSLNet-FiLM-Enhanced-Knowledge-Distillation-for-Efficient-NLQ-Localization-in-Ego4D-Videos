@@ -186,10 +186,13 @@ def apply_post_training_static_quantization(
     fused_model = fuse_model(float_model)
 
     # 2. Define qconfigs
-    qconfig_global = QConfig(
-        activation=MinMaxObserver.with_args(dtype=torch.quint8),
-        weight=default_observer.with_args(dtype=torch.qint8)
-    )
+    # qconfig_global = QConfig(
+    #     activation=MinMaxObserver.with_args(dtype=torch.quint8),
+    #     weight=default_observer.with_args(dtype=torch.qint8)
+    # )
+    # qconfig_emb = float_qparams_weight_only_qconfig
+    # 2. Use default qconfigs that are guaranteed to work with FBGEMM
+    qconfig_global = torch.ao.quantization.get_default_qconfig('fbgemm')
     qconfig_emb = float_qparams_weight_only_qconfig
 
     # 3. Create quantization-ready wrapper and assign qconfigs
