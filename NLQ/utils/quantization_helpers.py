@@ -159,7 +159,7 @@ def run_static_quantization_calibration(
             )
             # generate mask
             video_mask = convert_length_to_mask(vfeat_lens).to(device)
-            
+
             # forward pass to collect observer stats
             model(word_ids, char_ids, vfeats, video_mask, query_mask)
 
@@ -191,18 +191,16 @@ def apply_post_training_static_quantization(
     # 1: Fuse modules to improve quantization efficiency
     fused_model = fuse_model(float_model)
 
-    # Define qconfigs for general and embedding layers
+    # 2. Define qconfigs
     qconfig_global = QConfig(
         activation=MinMaxObserver.with_args(dtype=torch.qint8),
         weight=default_observer.with_args(dtype=torch.qint8)
     )
     qconfig_emb = float_qparams_weight_only_qconfig
 
-    # 2: Assign qconfigs to modules
-    assign_qconfig(fused_model, qconfig_global, qconfig_emb)
-
-    # 3: Prepare model by inserting observers for calibration
+    # 3. Create quantization-ready wrapper and assign qconfigs
     quant_ready_model = QuantizedDeepVSLNet(fused_model)
+    assign_qconfig(quant_ready_model, qconfig_global, qconfig_emb)
     torch.ao.quantization.prepare(quant_ready_model, inplace=True)
 
     # 4: Calibrate observers with calibration data

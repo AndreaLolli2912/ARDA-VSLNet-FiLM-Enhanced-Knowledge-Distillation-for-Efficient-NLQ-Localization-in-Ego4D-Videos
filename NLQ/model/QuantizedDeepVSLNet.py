@@ -67,14 +67,12 @@ class QuantizedDeepVSLNet(nn.Module):
         self.cq_concat = base_model.cq_concat
         self.highlight_layer = base_model.highlight_layer
         self.predictor = base_model.predictor
-    
+
     def forward(self, word_ids, char_ids, video_features, v_mask, q_mask):
+        
         video_features = self.video_quant(video_features)
-
         video_features = self.video_affine(video_features)
-        query_features = self.embedding_net(word_ids, char_ids)
-
-        query_features = self.query_quant(query_features)
+        query_features = self.query_quant(self.embedding_net(word_ids, char_ids))
 
         query_features = self.feature_encoder(query_features, mask=q_mask)
 
@@ -97,12 +95,12 @@ class QuantizedDeepVSLNet(nn.Module):
     def extract_index(self, start_logits, end_logits):
         return self.predictor.extract_index(
             start_logits=start_logits, end_logits=end_logits
-        )
+            )
 
     def compute_highlight_loss(self, scores, labels, mask):
         return self.highlight_layer.compute_loss(
             scores=scores, labels=labels, mask=mask
-        )
+            )
 
     def compute_loss(self, start_logits, end_logits, start_labels, end_labels):
         return self.predictor.compute_cross_entropy_loss(
@@ -110,4 +108,4 @@ class QuantizedDeepVSLNet(nn.Module):
             end_logits=end_logits,
             start_labels=start_labels,
             end_labels=end_labels,
-        )
+            )
