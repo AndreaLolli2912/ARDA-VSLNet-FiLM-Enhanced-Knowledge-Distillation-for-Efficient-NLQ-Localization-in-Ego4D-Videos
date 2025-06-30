@@ -2,6 +2,9 @@ import copy
 
 import torch
 from torch import nn
+from torch.ao.quantization.qconfig import QConfig, float_qparams_weight_only_qconfig
+from torch.ao.quantization.observer import MinMaxObserver
+from torch.ao.quantization.observer import default_observer
 
 from model.layers import Conv1D, Conv1DReLU
 from model.QuantizedDeepVSLNet import QuantizedDeepVSLNet
@@ -95,6 +98,25 @@ def fuse_model(model, inplace=False):
     model_copy.predictor = fuse_conditioned_predictor(model_copy.predictor, inplace=inplace)
     return model_copy
 
+def assign_qconfig(model, qconfig_global, qconfig_emb):
+    """
+    Assigns quantization configurations to model modules.
+
+    Embedding layers get the embedding-specific qconfig.
+    All other modules get the global qconfig unless already assigned.
+
+    Parameters:
+    - model (nn.Module): Model to assign qconfigs to.
+    - qconfig_global (QConfig): Quantization config for general modules.
+    - qconfig_emb (QConfig): Quantization config for embedding layers.
+    """
+    for name, module in model.named_modules():
+        if isinstance(module, torch.nn.Embedding):
+            module.qconfig = qconfig_emb
+        else:
+            if not hasattr(module, 'qconfig') or module.qconfig is None:
+                module.qconfig = qconfig_global
+
 def run_static_quantization_calibration(
     model: nn.Module,
     data_loader: torch.utils.data.DataLoader,
@@ -141,44 +163,53 @@ def run_static_quantization_calibration(
             model(word_ids, char_ids, vfeats, video_mask, query_mask)
 
 def apply_post_training_static_quantization(
-        float_model: nn.Module,
+        float_model: torch.nn.Module,
         calibration_loader: torch.utils.data.DataLoader,
         num_calibration_batches: int
-):
+) -> torch.nn.Module:
     """
-    Applies post-training static quantization to a given float model.
+    Applies post-training static quantization to a floating-point model.
 
-    Steps:
-    1. Fuse supported modules (e.g., Conv+BN+ReLU).
-    2. Attach quantization configuration and insert observers.
-    3. Calibrate using representative training data.
-    4. Convert the model to a quantized version.
+    Workflow:
+    1. Fuse supported layers (e.g., Conv+BatchNorm+ReLU).
+    2. Assign quantization configs and insert observers.
+    3. Run calibration using representative data.
+    4. Convert model to quantized version.
 
     Parameters:
-    - float_model (nn.Module): The pre-trained float32 model.
-    - calibration_loader (DataLoader): Representative data for calibration.
-    - num_calibration_batches (int): Number of batches to use for calibration.
+    - float_model (nn.Module): Pretrained float model to quantize.
+    - calibration_loader (DataLoader): Data loader for calibration dataset.
+    - num_calibration_batches (int): Number of batches for calibration.
 
     Returns:
-    - nn.Module: The quantized version of the model.
+    - quantized_model (nn.Module): Quantized model ready for inference.
     """
     float_model.eval()
     float_model.to("cpu")
-    
-    # 1: fuse modules
+
+    # 1: Fuse modules to improve quantization efficiency
     fused_model = fuse_model(float_model)
-    fused_model.qconfig = torch.ao.quantization.default_qconfig
-    
-    # 2: insert observers
+
+    # Define qconfigs for general and embedding layers
+    qconfig_global = QConfig(
+        activation=MinMaxObserver.with_args(dtype=torch.qint8),
+        weight=default_observer.with_args(dtype=torch.qint8)
+    )
+    qconfig_emb = float_qparams_weight_only_qconfig
+
+    # 2: Assign qconfigs to modules
+    assign_qconfig(fused_model, qconfig_global, qconfig_emb)
+
+    # 3: Prepare model by inserting observers for calibration
     quant_ready_model = QuantizedDeepVSLNet(fused_model)
     torch.ao.quantization.prepare(quant_ready_model, inplace=True)
 
-    # 3: calibration
+    # 4: Calibrate observers with calibration data
     run_static_quantization_calibration(
         quant_ready_model, calibration_loader, num_calibration_batches
     )
 
-    # 4: convert to quantized
+    # 5: Convert calibrated model to quantized version
     quantized_model = torch.ao.quantization.convert(quant_ready_model, inplace=False)
     quantized_model.eval()
 

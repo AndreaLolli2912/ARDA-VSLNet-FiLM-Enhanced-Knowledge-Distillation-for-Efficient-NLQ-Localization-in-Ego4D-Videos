@@ -54,10 +54,6 @@ def main(configs, parser):
     configs.num_train_steps = len(train_loader) * configs.epochs
     num_train_batches = len(train_loader)
 
-    # # Device configuration NOTE: The model quantization is supported for CPU only
-    # cuda_str = "cuda" if configs.gpu_idx is None else "cuda:{}".format(configs.gpu_idx)
-    # device = torch.device(cuda_str if torch.cuda.is_available() else "cpu")
-    # print(f"Using device={device}")
     device = "cpu"
 
     # create model dir
