@@ -1,3 +1,4 @@
+"""Quantization helper functions"""
 import copy
 
 import torch
@@ -76,6 +77,7 @@ def fuse_conv1d_relu_in_sequential(seq: nn.Sequential) -> nn.Sequential:
     return nn.Sequential(*layers)
 
 def fuse_predictor_head(predictor_head: nn.Sequential, inplace=False) -> nn.Sequential:
+    """Fuses conv1d+relu layers in predictor head."""
     block = predictor_head if inplace else copy.deepcopy(predictor_head)
     return fuse_conv1d_relu_in_sequential(block)
 
