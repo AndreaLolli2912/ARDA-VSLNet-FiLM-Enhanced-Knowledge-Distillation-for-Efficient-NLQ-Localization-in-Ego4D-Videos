@@ -67,24 +67,6 @@ class QuantizedDeepVSLNet(nn.Module):
         self.cq_concat = base_model.cq_concat
         self.highlight_layer = base_model.highlight_layer
         self.predictor = base_model.predictor
-        
-
-        self.init_parameters()
-
-    def init_parameters(self):
-        def init_weights(m):
-            if (
-                isinstance(m, nn.Conv2d)
-                or isinstance(m, nn.Conv1d)
-                or isinstance(m, nn.Linear)
-            ):
-                torch.nn.init.xavier_uniform_(m.weight)
-                if m.bias is not None:
-                    torch.nn.init.zeros_(m.bias)
-            elif isinstance(m, nn.LSTM):
-                m.reset_parameters()
-
-        self.apply(init_weights)
     
     def forward(self, word_ids, char_ids, video_features, v_mask, q_mask):
         video_features = self.video_quant(video_features)

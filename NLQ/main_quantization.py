@@ -104,8 +104,6 @@ def main(configs, parser):
     filename = get_last_checkpoint(model_dir_teacher, suffix="t7")
     model.load_state_dict(torch.load(filename))
 
-    optimizer, scheduler = build_optimizer_and_scheduler(model, configs=configs)
-    
     # quantization
     model = apply_post_training_static_quantization(
         float_model=model,
