@@ -293,44 +293,42 @@ class QMultiHeadAttentionBlock(nn.Module):
         new_shape = old_shape[:-2] + [old_shape[-2] * old_shape[-1]]
         return x.reshape(shape=new_shape)
 
-    def forward(self, x, mask=None):
-        x_dequant = self.dequant(x)
-        output = self.layer_norm1(x_dequant)  # (batch_size, seq_len, dim)
-        output = self.dropout(output)
-        # multi-head attention layer
-        query = self.transpose_for_scores(
-            self.query(output)
-        )  # (batch_size, num_heads, seq_len, head_size)
-        key = self.transpose_for_scores(self.key(output))
-        value = self.transpose_for_scores(self.value(output))
-        
-        attention_scores = torch.matmul(
-            query, key.transpose(-1, -2)
-        )  # (batch_size, num_heads, seq_len, seq_len)
-        query = self.quant(query)
-        key = self.quant(key)
-        attention_scores = attention_scores / math.sqrt(self.head_size)
-        if mask is not None:  # masking
-            mask = mask.unsqueeze(1).unsqueeze(2)  # (batch_size, 1, 1, seq_len)
-            attention_scores = qmask_logits(attention_scores, mask, self.quant, self.dequant)
-        attention_probs = nn.Softmax(dim=-1)(
-            attention_scores
-        )  # (batch_size, num_heads, seq_len, seq_len)
-        attention_probs = self.dropout(attention_probs)
-        value = torch.matmul(
-            attention_probs, value
-        )  # (batch_size, num_heads, seq_len, head_size)
-        value = self.combine_last_two_dim(
-            value.permute(0, 2, 1, 3)
-        )  # (batch_size, seq_len, dim)
-        # intermediate layer
-        output = self.quant(self.dropout(self.dequant(value)))
-        residual = self.ff.add(output, x)
-        output = self.layer_norm2(residual)
-        output = self.dropout(output)
-        output = self.out_layer(output)
-        output = self.ff.add(self.dropout(output), residual)
-        return output
+    def forward(self, x_q, mask=None):
+        # 1) bring int8 → float for everything non-quantizable
+        x_f = self.dequant(x_q)
+        x_f = self.layer_norm1(x_f)
+        x_f = self.dropout(x_f)
+
+        # 2) build Q,K,V in float
+        Q = self.transpose_for_scores(self.query(x_f))
+        K = self.transpose_for_scores(self.key(x_f))
+        V = self.transpose_for_scores(self.value(x_f))
+
+        # 3) compute attention in float
+        scores = torch.matmul(Q, K.transpose(-1, -2))
+        scores = scores / math.sqrt(self.head_size)
+        if mask is not None:
+            scores = qmask_logits(scores, mask.unsqueeze(1).unsqueeze(2), quant=self.quant, dequant=self.dequant)
+        probs = F.softmax(scores, dim=-1)
+        probs = self.dropout(probs)
+        context = torch.matmul(probs, V)
+        context = context.permute(0, 2, 1, 3)
+        context = context.reshape(x_f.size(0), x_f.size(1), self.dim)
+
+        # 4) float → int8 before elementwise & conv
+        context_q = self.quant(context)
+        residual  = self.ff.add(context_q, x_q)    # both int8
+        # 5) LayerNorm2/droput on float
+        res_f = self.dequant(residual)
+        res_f = self.layer_norm2(res_f)
+        res_f = self.dropout(res_f)
+
+        # 6) project out and add back in quant domain
+        proj_f = self.out_layer(res_f)
+        proj_q = self.quant(proj_f)
+        out_q  = self.ff.add(proj_q, residual)
+
+        return out_q
 
 
 class QFeatureEncoder(nn.Module):
