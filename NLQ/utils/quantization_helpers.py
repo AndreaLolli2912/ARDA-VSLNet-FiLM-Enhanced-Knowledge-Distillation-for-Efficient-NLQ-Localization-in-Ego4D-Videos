@@ -185,7 +185,6 @@ def apply_post_training_static_quantization(
 
     # 1) fuse
     fused_model = fuse_model(float_model)
-ì
 
     # 3) build global qconfig
     qconfig_global = torch.ao.quantization.default_qconfig
