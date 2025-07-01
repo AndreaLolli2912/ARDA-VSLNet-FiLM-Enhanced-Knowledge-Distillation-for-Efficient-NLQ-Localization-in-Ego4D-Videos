@@ -490,7 +490,6 @@ class QCQConcatenate(nn.Module):
         self.dequant = dequant
         self.ff = FloatFunctional()
 
-        super(QCQConcatenate, self).__init__()
         self.weighted_pool = QWeightedPool(dim=dim, quant=quant, dequant=dequant)
         self.conv1d = Conv1D(
             in_dim=2 * dim, out_dim=dim, kernel_size=1, stride=1, padding=0, bias=True
