@@ -109,7 +109,7 @@ def assign_qconfig(model, qconfig_global):
             module.qconfig = None
 
         # 2) Quantize any 1×1 conv (Conv1D) or nn.Linear downstream
-        elif isinstance(module, (Conv1D, nn.Linear)):
+        elif isinstance(module, (Conv1D)):
             module.qconfig = qconfig_global
 
         # 3) Everything else (LayerNorm, Dropout, FloatFunctional, etc.) stays in FP32
