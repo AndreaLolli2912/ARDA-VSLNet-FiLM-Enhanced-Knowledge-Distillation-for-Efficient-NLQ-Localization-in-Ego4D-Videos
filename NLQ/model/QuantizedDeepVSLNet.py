@@ -15,7 +15,7 @@ from model.qlayers import (
     QCQAttention,
     QCQConcatenate,
     QHighLightLayer,
-    QConditionedPredictor
+    QConditionedPredictor,
 )
 
 

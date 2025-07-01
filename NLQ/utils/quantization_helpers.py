@@ -101,20 +101,20 @@ def fuse_model(model, inplace=False):
 
 def assign_qconfig(model, qconfig_global):
     """
-    Assigns quantization configurations to model modules.
-
-    Parameters:
-    - model (nn.Module): Model to assign qconfigs to.
-    - qconfig_global (QConfig): Quantization config for general modules.
-    - qconfig_emb (QConfig): Quantization config for embedding layers (ignored if skip_embedding=True).
-    - skip_embedding (bool): If True, embedding layers will not be quantized.
+    Skips embedding_net entirely, quantizes Conv1D and nn.Linear everywhere else.
     """
     for name, module in model.named_modules():
-        if isinstance(module, torch.nn.Embedding):
-            module.qconfig = None  # Skip quantization for embedding layers
+        # 1) Skip all of embedding_net (word + char lookups and char-CNN)
+        if name.startswith("embedding_net"):
+            module.qconfig = None
+
+        # 2) Quantize any 1×1 conv (Conv1D) or nn.Linear downstream
+        elif isinstance(module, (Conv1D, nn.Linear)):
+            module.qconfig = qconfig_global
+
+        # 3) Everything else (LayerNorm, Dropout, FloatFunctional, etc.) stays in FP32
         else:
-            if not hasattr(module, 'qconfig') or module.qconfig is None:
-                module.qconfig = qconfig_global
+            module.qconfig = None
 
 def run_static_quantization_calibration(
     model: nn.Module,
@@ -180,25 +180,29 @@ def apply_post_training_static_quantization(
     """
     float_model.eval()
     float_model.to("cpu")
+    
 
-    # 1: Fuse modules to improve quantization efficiency
+    # 1) fuse
     fused_model = fuse_model(float_model)
 
-    # 2. Use default qconfigs that are guaranteed to work with FBGEMM
+    # 2) pick engine
+    torch.backends.quantized.engine = "fbgemm"
+
+    # 3) build global qconfig
     qconfig_global = QConfig(
         activation=MinMaxObserver.with_args(dtype=torch.quint8),
         weight=default_observer.with_args(dtype=torch.qint8)
     )
-    # 3. Create quantization-ready wrapper and assign qconfigs
+    
+    # 4) assign new qconfigs
     assign_qconfig(fused_model, qconfig_global)
-    quant_ready_model = torch.ao.quantization.prepare(fused_model)
+    
 
-    # 4: Calibrate observers with calibration data
+    # 5) prepare + calibrate + convert
+    quant_ready_model = torch.ao.quantization.prepare(fused_model)
     run_static_quantization_calibration(
         quant_ready_model, calibration_loader, num_calibration_batches
     )
-
-    # 5: Convert calibrated model to quantized version
     quantized_model = torch.ao.quantization.convert(quant_ready_model, inplace=False)
     quantized_model.eval()
 
