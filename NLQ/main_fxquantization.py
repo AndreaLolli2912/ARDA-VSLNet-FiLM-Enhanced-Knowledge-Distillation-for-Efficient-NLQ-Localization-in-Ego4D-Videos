@@ -142,7 +142,7 @@ def main(configs, parser):
     )
     
     qconfig = get_default_qconfig("x86")
-    qconfig_mapping = (QConfigMapping
+    qconfig_mapping = (QConfigMapping()
                        .set_global(qconfig)
                        .set_object_type(nn.Embedding, None)
                        .set_object_type(nn.LayerNorm, None)
