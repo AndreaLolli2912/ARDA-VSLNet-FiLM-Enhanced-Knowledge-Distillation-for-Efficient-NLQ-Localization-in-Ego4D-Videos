@@ -98,7 +98,10 @@ def main(configs, parser):
     # load weights
     model_dir_teacher = configs.model_dir_teacher
     filename = get_last_checkpoint(model_dir_teacher, suffix="t7")
-    model.load_state_dict(torch.load(filename, map_location='cpu'))
+    state_dict = torch.load(filename, map_location='cpu')
+    state_dict.pop("linear_modulation.film_generator.weight", None)
+    state_dict.pop("linear_modulation.film_generator.bias", None)
+    model.load_state_dict(state_dict)
 
     # quantization
     model = apply_post_training_static_quantization(
