@@ -185,14 +185,13 @@ def apply_post_training_static_quantization(
     fused_model = fuse_model(float_model)
 
     # 2. Use default qconfigs that are guaranteed to work with FBGEMM
-    qconfig_global = qconfig_global = QConfig(
+    qconfig_global = QConfig(
         activation=MinMaxObserver.with_args(dtype=torch.quint8),
         weight=default_observer.with_args(dtype=torch.qint8)
     )
     # 3. Create quantization-ready wrapper and assign qconfigs
-    quant_ready_model = QuantizedDeepVSLNet(fused_model)
-    assign_qconfig(quant_ready_model, qconfig_global)
-    torch.ao.quantization.prepare(quant_ready_model, inplace=True)
+    assign_qconfig(fused_model, qconfig_global)
+    quant_ready_model = torch.ao.quantization.prepare(fused_model)
 
     # 4: Calibrate observers with calibration data
     run_static_quantization_calibration(
