@@ -185,16 +185,10 @@ def apply_post_training_static_quantization(
 
     # 1) fuse
     fused_model = fuse_model(float_model)
-
-    # 2) pick engine
-    torch.backends.quantized.engine = "qnnpack"
+ì
 
     # 3) build global qconfig
-    qconfig_global = QConfig(
-        activation=MinMaxObserver.with_args(dtype=torch.quint8),
-        weight=default_observer.with_args(dtype=torch.qint8)
-    )
-    
+    qconfig_global = torch.ao.quantization.default_qconfig
     # 4) assign new qconfigs
     assign_qconfig(fused_model, qconfig_global)
     
