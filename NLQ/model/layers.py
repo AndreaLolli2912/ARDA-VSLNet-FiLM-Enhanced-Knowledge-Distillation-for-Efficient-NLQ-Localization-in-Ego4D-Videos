@@ -440,7 +440,7 @@ class WeightedPool(nn.Module):
 
 
 class CQConcatenate(nn.Module):
-    def __init__(self, dim, quant, dequant):
+    def __init__(self, dim):
         super(CQConcatenate, self).__init__()
 
         self.weighted_pool = WeightedPool(dim=dim)
