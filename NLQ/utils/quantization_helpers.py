@@ -187,7 +187,7 @@ def apply_post_training_static_quantization(
     fused_model = fuse_model(float_model)
 
     # 2) pick engine
-    torch.backends.quantized.engine = "fbgemm"
+    torch.backends.quantized.engine = "qnnpack"
 
     # 3) build global qconfig
     qconfig_global = QConfig(
