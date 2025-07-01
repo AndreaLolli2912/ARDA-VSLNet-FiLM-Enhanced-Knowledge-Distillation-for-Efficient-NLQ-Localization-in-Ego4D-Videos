@@ -325,7 +325,7 @@ class QMultiHeadAttentionBlock(nn.Module):
         )  # (batch_size, seq_len, dim)
         # intermediate layer
         output = self.quant(self.dropout(self.dequant(value)))
-        residual = self.ff.add(output + x)
+        residual = self.ff.add(output, x)
         output = self.layer_norm2(residual)
         output = self.dropout(output)
         output = self.out_layer(output)
@@ -354,7 +354,6 @@ class QFeatureEncoder(nn.Module):
         self.film_after_pos  = QFiLM(dim, quant, dequant)
         self.film_after_conv = QFiLM(dim, quant, dequant)
         self.film_after_attn = QFiLM(dim, quant, dequant)
-        
 
     def forward(self, x, mask, query_feats=None, film_mode="off"):
         x = self.dequant(x)
