@@ -3,6 +3,7 @@ import copy
 
 import torch
 from torch import nn
+from torch.nn import Conv1d
 from torch.ao.quantization.qconfig import QConfig, float_qparams_weight_only_qconfig
 from torch.ao.quantization.observer import MinMaxObserver
 from torch.ao.quantization.observer import default_observer
@@ -109,7 +110,7 @@ def assign_qconfig(model, qconfig_global):
             module.qconfig = None
 
         # 2) Quantize any 1×1 conv (Conv1D) or nn.Linear downstream
-        elif isinstance(module, (Conv1D)):
+        elif isinstance(module, (Conv1D, Conv1d)):
             module.qconfig = qconfig_global
 
         # 3) Everything else (LayerNorm, Dropout, FloatFunctional, etc.) stays in FP32

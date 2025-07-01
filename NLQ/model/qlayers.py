@@ -653,5 +653,3 @@ class QConditionedPredictor(nn.Module):
         start_loss = nn.CrossEntropyLoss(reduction="mean")(start_logits, start_labels)
         end_loss = nn.CrossEntropyLoss(reduction="mean")(end_logits, end_labels)
         return start_loss + end_loss
-
-x
