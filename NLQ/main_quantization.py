@@ -9,7 +9,7 @@ from torch import nn
 from torch.utils.tensorboard.writer import SummaryWriter
 import options
 
-from model.DeepVSLNet import DeepVSLNet, build_optimizer_and_scheduler
+from model.QuantizedDeepVSLNet import QuantizedDeepVSLNet
 from utils.data_gen import gen_or_load_dataset
 from utils.data_loader import get_test_loader, get_train_loader
 from utils.data_util import load_json, load_video_features, save_json
@@ -91,7 +91,7 @@ def main(configs, parser):
         save_pretty=True,
     )
     # build model
-    model = DeepVSLNet(
+    model = QuantizedDeepVSLNet(
         configs=configs, word_vectors=dataset.get("word_vector", None)
     ).to(device)
 
