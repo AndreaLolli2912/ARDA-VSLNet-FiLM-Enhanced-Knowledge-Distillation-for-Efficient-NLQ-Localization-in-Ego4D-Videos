@@ -11,6 +11,7 @@ import submitit
 from torch.utils.tensorboard.writer import SummaryWriter
 import nltk
 
+import torch.fx.experimental.proxy_tensor as pt
 from torch.ao.quantization import get_default_qconfig, QConfigMapping
 from torch.ao.quantization.quantize_fx import prepare_fx, convert_fx, fuse_fx
 from model.VSLNet import build_optimizer_and_scheduler, VSLNet
@@ -27,9 +28,39 @@ from utils.runner_utils import (
     get_last_checkpoint,
     set_th_config,
 )
-from utils.fx_quantization import calibrate
+
 
 from model.layers import FiLM
+
+def calibrate(model, data_loader, num_batches):
+    model.eval()
+
+    with torch.no_grad():
+        for i, data in enumerate(data_loader):
+            if i >= num_batches:
+                break
+            (
+                _, # metadata (unused)
+                vfeats,
+                vfeat_lens,
+                word_ids,
+                char_ids,
+                *_,  # labels (unused)
+            ) = data
+
+            # prepare features
+            vfeats, vfeat_lens = vfeats.to(device), vfeat_lens.to(device)
+            word_ids, char_ids = word_ids.to(device), char_ids.to(device)
+            
+            # generate mask
+            query_mask = (
+                (torch.zeros_like(word_ids) != word_ids).float().to(device)
+            )
+            # generate mask
+            video_mask = convert_length_to_mask(vfeat_lens).to(device)
+
+            # forward pass to collect observer stats
+            model(word_ids, char_ids, vfeats, video_mask, query_mask)
 
 
 def accuracy(output, target, topk=(1,)):
@@ -153,7 +184,7 @@ def main(configs, parser):
                        .set_module_name("query_affine", None)
                     )
     example_inputs = (next(iter(train_loader))[0])
-     
+
     prepared_model = prepare_fx(model_to_quantize, qconfig_mapping, example_inputs)
     num_calibration_batches = num_train_batches//4
     calibrate(prepared_model, train_loader, num_calibration_batches)
