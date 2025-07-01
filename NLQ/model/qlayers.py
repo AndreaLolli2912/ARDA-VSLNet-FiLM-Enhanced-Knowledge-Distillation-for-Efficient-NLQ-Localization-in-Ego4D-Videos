@@ -339,7 +339,7 @@ class QFeatureEncoder(nn.Module):
     ):
         super(QFeatureEncoder, self).__init__()
         self.quant = quant
-        self.dequent = dequant
+        self.dequant = dequant
         self.ff = FloatFunctional()
         self.pos_embedding = PositionalEmbedding(
             num_embeddings=max_pos_len, embedding_dim=dim
