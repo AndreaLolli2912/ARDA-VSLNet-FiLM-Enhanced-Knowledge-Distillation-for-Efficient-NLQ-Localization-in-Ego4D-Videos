@@ -27,6 +27,7 @@ from utils.runner_utils import (
     get_last_checkpoint,
     set_th_config,
 )
+from utils.fx_quantization import calibrate
 
 from model.layers import FiLM
 
@@ -152,145 +153,55 @@ def main(configs, parser):
                        .set_module_name("query_affine", None)
                     )
     example_inputs = (next(iter(train_loader))[0])
+     
     prepared_model = prepare_fx(model_to_quantize, qconfig_mapping, example_inputs)
+    num_calibration_batches = num_train_batches//4
+    calibrate(prepared_model, train_loader, num_calibration_batches)
+    quantized_model = convert_fx(prepared_model)
     
     global_step = 0
-    for epoch in range(1):
-        
-        for data in tqdm(
-            train_loader,
-            total=num_train_batches,
-            desc="Epoch %3d / %3d" % (epoch + 1, configs.epochs),
-        ):
-            global_step += 1
-            (
-                _,
-                vfeats,
-                vfeat_lens,
-                word_ids,
-                char_ids,
-                s_labels,
-                e_labels,
-                h_labels,
-            ) = data
-            # prepare features
-            vfeats, vfeat_lens = vfeats.to(device), vfeat_lens.to(device)
-            s_labels, e_labels, h_labels = (
-                s_labels.to(device),
-                e_labels.to(device),
-                h_labels.to(device),
-            )
-            if configs.predictor == "bert":
-                # print(f"{configs.predictor=}")
-                word_ids = {key: val.to(device) for key, val in word_ids.items()}
-                # generate mask
-                query_mask = (
-                    (
-                        torch.zeros_like(word_ids["input_ids"])
-                        != word_ids["input_ids"]
-                    )
-                    .float()
-                    .to(device)
-                )
-            else:
-                # print(f"{configs.predictor=}")
-                word_ids, char_ids = word_ids.to(device), char_ids.to(device)
-                # generate mask
-                query_mask = (
-                    (torch.zeros_like(word_ids) != word_ids).float().to(device)
-                )
-            # generate mask
-            video_mask = convert_length_to_mask(vfeat_lens).to(device)
-            # compute logits
-            if configs.model_name in ["vslnet", "deepvslnet", "teachercbkd"]:
-                h_score, start_logits, end_logits = model(
-                    word_ids, char_ids, vfeats, video_mask, query_mask
-                )
-            elif configs.model_name == "vslbase":
-                start_logits, end_logits = model(
-                    word_ids, char_ids, vfeats, video_mask, query_mask
-                )
+    for epoch in range(1):       
+        quantized_model.eval()
+        print(
+            f"\nEpoch: {epoch + 1:2d} | Step: {global_step:5d}", flush=True
+        )
+        result_save_path = os.path.join(
+            model_dir,
+            f"{configs.model_name}_{epoch}_{global_step}_preds.json",
+        )
+        # Evaluate on val, keep the top 3 checkpoints.
+        results, mIoU, (score_str, score_dict) = eval_test(
+            model=quantized_model,
+            data_loader=val_loader,
+            device=device,
+            mode="val",
+            epoch=epoch + 1,
+            global_step=global_step,
+            gt_json_path=configs.eval_gt_json,
+            result_save_path=result_save_path,
+            model_name=configs.model_name,
+        )
+        print(score_str, flush=True)
+        if writer is not None:
+            for name, value in score_dict.items():
+                kk = name.replace("\n", " ")
+                writer.add_scalar(f"Val/{kk}", value, global_step)
 
-            # compute loss
-            loc_loss = model.compute_loss(
-                start_logits, end_logits, s_labels, e_labels
-            )
-
-            if configs.model_name in ["vslnet", "deepvslnet", "teachercbkd"]:
-                highlight_loss = model.compute_highlight_loss(
-                h_score, h_labels, video_mask
-                )
-                total_loss = loc_loss + configs.highlight_lambda * highlight_loss
-            elif configs.model_name == "vslbase":
-                total_loss = loc_loss
-            
-            # compute and apply gradients
-            optimizer.zero_grad()
-            total_loss.backward()
-            nn.utils.clip_grad_norm_(
-                model.parameters(), configs.clip_norm
-            )  # clip gradient
-            optimizer.step()
-            scheduler.step()
-            if configs.model_name in ["vslnet", "deepvslnet", "teachercbkd"]:
-                if writer is not None and global_step % configs.tb_log_freq == 0:
-                    writer.add_scalar("Loss/Total", total_loss.detach().cpu(), global_step)
-                    writer.add_scalar("Loss/Loc", loc_loss.detach().cpu(), global_step)
-                    writer.add_scalar("Loss/Highlight", highlight_loss.detach().cpu(), global_step)
-                    writer.add_scalar("Loss/Highlight (*lambda)", (configs.highlight_lambda * highlight_loss.detach().cpu()), global_step)
-                    writer.add_scalar("LR", optimizer.param_groups[0]["lr"], global_step)
-            elif configs.model_name == "vslbase":
-                if writer is not None and global_step % configs.tb_log_freq == 0:
-                    writer.add_scalar("Loss/Total", total_loss.detach().cpu(), global_step)
-                    writer.add_scalar("Loss/Loc", loc_loss.detach().cpu(), global_step)
-                    writer.add_scalar("LR", optimizer.param_groups[0]["lr"], global_step)
-
-            # evaluate
-            if (
-                global_step % eval_period == 0
-                or global_step % num_train_batches == 0
-            ):
-                model.eval()
-                print(
-                    f"\nEpoch: {epoch + 1:2d} | Step: {global_step:5d}", flush=True
-                )
-                result_save_path = os.path.join(
+        score_writer.write(score_str)
+        score_writer.flush()
+        # Recall@1, 0.3 IoU overlap --> best metric.
+        if results[0][0] >= best_metric:
+            best_metric = results[0][0]
+            torch.save(
+                quantized_model.state_dict(),
+                os.path.join(
                     model_dir,
-                    f"{configs.model_name}_{epoch}_{global_step}_preds.json",
-                )
-                # Evaluate on val, keep the top 3 checkpoints.
-                results, mIoU, (score_str, score_dict) = eval_test(
-                    model=model,
-                    data_loader=val_loader,
-                    device=device,
-                    mode="val",
-                    epoch=epoch + 1,
-                    global_step=global_step,
-                    gt_json_path=configs.eval_gt_json,
-                    result_save_path=result_save_path,
-                    model_name=configs.model_name,
-                )
-                print(score_str, flush=True)
-                if writer is not None:
-                    for name, value in score_dict.items():
-                        kk = name.replace("\n", " ")
-                        writer.add_scalar(f"Val/{kk}", value, global_step)
-
-                score_writer.write(score_str)
-                score_writer.flush()
-                # Recall@1, 0.3 IoU overlap --> best metric.
-                if results[0][0] >= best_metric:
-                    best_metric = results[0][0]
-                    torch.save(
-                        model.state_dict(),
-                        os.path.join(
-                            model_dir,
-                            "{}_{}.t7".format(configs.model_name, global_step),
-                        ),
-                    )
-                    # only keep the top-3 model checkpoints
-                    filter_checkpoints(model_dir, suffix="t7", max_to_keep=3)
-                model.train()
+                    "{}_{}.t7".format(configs.model_name, global_step),
+                ),
+            )
+            # only keep the top-3 model checkpoints
+            filter_checkpoints(model_dir, suffix="t7", max_to_keep=3)
+                
         
     score_writer.close()
 
