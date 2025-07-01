@@ -10,11 +10,6 @@ from torch.ao.quantization.quantize_fx import prepare_fx, convert_fx, fuse_fx
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
-import torchvision
-from torchvision import datasets
-from torchvision.models.resnet import resnet18
-import torchvision.transforms as transforms
-
 
 def calibrate(model, data_loader, num_batches):
     model.eval()
