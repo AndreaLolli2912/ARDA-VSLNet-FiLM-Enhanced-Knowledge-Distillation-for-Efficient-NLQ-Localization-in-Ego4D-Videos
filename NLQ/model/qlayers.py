@@ -6,30 +6,21 @@ import math
 import torch
 from torch import nn
 from torch.nn import functional as F
+from torch.ao.nn.quantized import FloatFunctional
 
+from model.layers import Conv1D
 
-def mask_logits(inputs, mask, mask_value=-1e30):
-    mask = mask.type(torch.float32)
-    return inputs + (1.0 - mask) * mask_value
+# qfilm
+#qfeatenc
+#QWeightedPool
+#qmask
+#QHighLightLayer
+#QDynamicRNN
 
-
-class Conv1D(nn.Module):
-    def __init__(self, in_dim, out_dim, kernel_size=1, stride=1, padding=0, bias=True):
-        super(Conv1D, self).__init__()
-        self.conv1d = nn.Conv1d(
-            in_channels=in_dim,
-            out_channels=out_dim,
-            kernel_size=kernel_size,
-            padding=padding,
-            stride=stride,
-            bias=bias,
-        )
-
-    def forward(self, x):
-        # suppose all the input with shape (batch_size, seq_len, dim)
-        x = x.transpose(1, 2)  # (batch_size, dim, seq_len)
-        x = self.conv1d(x)
-        return x.transpose(1, 2)  # (batch_size, seq_len, dim)
+def qmask_logits(inputs, mask, quant, dequant, mask_value=-1e30):
+    mask = mask.type(torch.float32) 
+    result = dequant(inputs) + (1 - mask) * mask_value   
+    return quant(result)
     
 class Conv1DReLU(nn.Module):
     def __init__(self, conv1d_module: Conv1D):
@@ -214,9 +205,12 @@ class VisualProjection(nn.Module):
         return output
 
 
-class DepthwiseSeparableConvBlock(nn.Module):
-    def __init__(self, dim, kernel_size, drop_rate, num_layers=4):
-        super(DepthwiseSeparableConvBlock, self).__init__()
+class QDepthwiseSeparableConvBlock(nn.Module):
+    def __init__(self, dim, quant, dequant, kernel_size, drop_rate, num_layers=4):
+        super(QDepthwiseSeparableConvBlock, self).__init__()
+        self.quant = quant
+        self.dequant = dequant
+        self.ff = FloatFunctional()
         self.depthwise_separable_conv = nn.ModuleList(
             [
                 nn.Sequential(
@@ -249,17 +243,19 @@ class DepthwiseSeparableConvBlock(nn.Module):
         output = x  # (batch_size, seq_len, dim)
         for idx, conv_layer in enumerate(self.depthwise_separable_conv):
             residual = output
+            output = self.dequant(output)
             output = self.layer_norms[idx](output)  # (batch_size, seq_len, dim)
+            output = self.quant(output)
             output = output.transpose(1, 2)  # (batch_size, dim, seq_len)
             output = conv_layer(output)
             output = self.dropout(output)
-            output = output.transpose(1, 2) + residual  # (batch_size, seq_len, dim)
+            output = self.ff.add(output.transpose(1, 2), residual)  # (batch_size, seq_len, dim)
         return output
 
 
-class MultiHeadAttentionBlock(nn.Module):
-    def __init__(self, dim, num_heads, drop_rate):
-        super(MultiHeadAttentionBlock, self).__init__()
+class QMultiHeadAttentionBlock(nn.Module):
+    def __init__(self, dim, quant, dequant, num_heads, drop_rate):
+        super(QMultiHeadAttentionBlock, self).__init__()
         assert (
             dim % num_heads == 0
         ), "The channels (%d) is not a multiple of attention heads (%d)" % (
@@ -282,6 +278,9 @@ class MultiHeadAttentionBlock(nn.Module):
         self.out_layer = Conv1D(
             in_dim=dim, out_dim=dim, kernel_size=1, stride=1, padding=0, bias=True
         )
+        self.quant = quant
+        self.dequant = dequant
+        self.ff = FloatFunctional()
 
     def transpose_for_scores(self, x):
         new_x_shape = x.size()[:-1] + (self.num_heads, self.head_size)
@@ -295,7 +294,8 @@ class MultiHeadAttentionBlock(nn.Module):
         return x.reshape(shape=new_shape)
 
     def forward(self, x, mask=None):
-        output = self.layer_norm1(x)  # (batch_size, seq_len, dim)
+        x_dequant = self.dequant(x)
+        output = self.layer_norm1(x_dequant)  # (batch_size, seq_len, dim)
         output = self.dropout(output)
         # multi-head attention layer
         query = self.transpose_for_scores(
@@ -303,13 +303,16 @@ class MultiHeadAttentionBlock(nn.Module):
         )  # (batch_size, num_heads, seq_len, head_size)
         key = self.transpose_for_scores(self.key(output))
         value = self.transpose_for_scores(self.value(output))
+        
         attention_scores = torch.matmul(
             query, key.transpose(-1, -2)
         )  # (batch_size, num_heads, seq_len, seq_len)
+        query = self.quant(query)
+        key = self.quant(key)
         attention_scores = attention_scores / math.sqrt(self.head_size)
         if mask is not None:  # masking
             mask = mask.unsqueeze(1).unsqueeze(2)  # (batch_size, 1, 1, seq_len)
-            attention_scores = mask_logits(attention_scores, mask)
+            attention_scores = qmask_logits(attention_scores, mask, self.quant, self.dequant)
         attention_probs = nn.Softmax(dim=-1)(
             attention_scores
         )  # (batch_size, num_heads, seq_len, seq_len)
@@ -321,35 +324,48 @@ class MultiHeadAttentionBlock(nn.Module):
             value.permute(0, 2, 1, 3)
         )  # (batch_size, seq_len, dim)
         # intermediate layer
-        output = self.dropout(value)
-        residual = output + x
+        output = self.quant(self.dropout(self.dequant(value)))
+        residual = self.ff.add(output + x)
         output = self.layer_norm2(residual)
         output = self.dropout(output)
         output = self.out_layer(output)
-        output = self.dropout(output) + residual
+        output = self.ff.add(self.dropout(output), residual)
         return output
 
 
-class FeatureEncoder(nn.Module):
+class QFeatureEncoder(nn.Module):
     def __init__(
-        self, dim, num_heads, max_pos_len, kernel_size=7, num_layers=4, drop_rate=0.0
+        self, dim, num_heads, max_pos_len, quant, dequant, kernel_size=7, num_layers=4, drop_rate=0.0
     ):
-        super(FeatureEncoder, self).__init__()
+        super(QFeatureEncoder, self).__init__()
+        self.quant = quant
+        self.dequent = dequant
+        self.ff = FloatFunctional()
         self.pos_embedding = PositionalEmbedding(
             num_embeddings=max_pos_len, embedding_dim=dim
         )
-        self.conv_block = DepthwiseSeparableConvBlock(
-            dim=dim, kernel_size=kernel_size, drop_rate=drop_rate, num_layers=num_layers
+        self.conv_block = QDepthwiseSeparableConvBlock(
+            dim=dim, quant=quant, dequant=dequant,
+            kernel_size=kernel_size, drop_rate=drop_rate, num_layers=num_layers
         )
-        self.attention_block = MultiHeadAttentionBlock(
-            dim=dim, num_heads=num_heads, drop_rate=drop_rate
+        self.attention_block = QMultiHeadAttentionBlock(
+            dim=dim, quant=quant, dequant=dequant, num_heads=num_heads, drop_rate=drop_rate
         )
-        self.film_after_pos = FiLM(dim)
-        self.film_after_conv = FiLM(dim)
-        self.film_after_attn = FiLM(dim)
+        self.film_after_pos  = QFiLM(dim, quant, dequant)
+        self.film_after_conv = QFiLM(dim, quant, dequant)
+        self.film_after_attn = QFiLM(dim, quant, dequant)
+        
 
     def forward(self, x, mask, query_feats=None, film_mode="off"):
-        features = x + self.pos_embedding(x)  # (batch_size, seq_len, dim)
+        x = self.dequant(x)
+
+        pos_emb_out = self.pos_embedding(x)
+
+        x = self.quant(x)
+        pos_emb_out = self.quant(pos_emb_out)
+        
+        features = self.ff.add(x, pos_emb_out) # (batch_size, seq_len, dim)
+        
         
         if film_mode in ["inside_encoder:after_pos", "inside_encoder:multi"]:
             features = self.film_after_pos(features, query_feats)
@@ -367,9 +383,12 @@ class FeatureEncoder(nn.Module):
         return features
 
 
-class CQAttention(nn.Module):
-    def __init__(self, dim, drop_rate=0.0):
-        super(CQAttention, self).__init__()
+class QCQAttention(nn.Module):
+    def __init__(self, dim, quant, dequant, drop_rate=0.0):
+        super(QCQAttention, self).__init__()
+        self.quant = quant
+        self.dequant = dequant
+        self.ff = FloatFunctional()
         w4C = torch.empty(dim, 1)
         w4Q = torch.empty(dim, 1)
         w4mlu = torch.empty(1, 1, dim)
@@ -389,18 +408,24 @@ class CQAttention(nn.Module):
             context, query
         )  # (batch_size, c_seq_len, q_seq_len)
         score_ = nn.Softmax(dim=2)(
-            mask_logits(score, q_mask.unsqueeze(1))
+            self.dequant(qmask_logits(score, q_mask.unsqueeze(1), self.quant, self.dequant))
         )  # (batch_size, c_seq_len, q_seq_len)
         score_t = nn.Softmax(dim=1)(
-            mask_logits(score, c_mask.unsqueeze(2))
+            self.dequant(qmask_logits(score, c_mask.unsqueeze(2), self.quant, self.dequant))
         )  # (batch_size, c_seq_len, q_seq_len)
         score_t = score_t.transpose(1, 2)  # (batch_size, q_seq_len, c_seq_len)
+
+        self.dequant(query)
         c2q = torch.matmul(score_, query)  # (batch_size, c_seq_len, dim)
         q2c = torch.matmul(
             torch.matmul(score_, score_t), context
         )  # (batch_size, c_seq_len, dim)
-        output = torch.cat(
-            [context, c2q, torch.mul(context, c2q), torch.mul(context, q2c)], dim=2
+
+        c2q = self.quant(c2q)
+        q2c = self.quant(q2c)
+
+        output = self.ff.cat(
+            [context, c2q, self.ff.mul(context, c2q), self.ff.mul(context, q2c)], dim=2
         )
         output = self.cqa_linear(output)  # (batch_size, c_seq_len, dim)
         return output
@@ -410,6 +435,13 @@ class CQAttention(nn.Module):
         batch_size, q_seq_len, dim = query.shape
         context = self.dropout(context)
         query = self.dropout(query)
+        
+        context    = self.dequant(context)
+        self.w4C   = self.dequant(self.w4C)
+        query      = self.dequant(query)
+        self.w4Q   = self.dequant(self.w4Q)
+        self.w4mlu = self.dequant(self.w4mlu)
+        
         subres0 = torch.matmul(context, self.w4C).expand(
             [-1, -1, q_seq_len]
         )  # (batch_size, c_seq_len, q_seq_len)
@@ -417,63 +449,86 @@ class CQAttention(nn.Module):
             torch.matmul(query, self.w4Q).transpose(1, 2).expand([-1, c_seq_len, -1])
         )
         subres2 = torch.matmul(context * self.w4mlu, query.transpose(1, 2))
-        res = subres0 + subres1 + subres2  # (batch_size, c_seq_len, q_seq_len)
+
+        context    = self.quant(context)
+        self.w4C   = self.quant(self.w4C)
+        query      = self.quant(query)
+        self.w4Q   = self.quant(self.w4Q)
+        self.w4mlu = self.quant(self.w4mlu)
+
+        subres0 = self.quant(subres0)
+        subres1 = self.quant(subres1)
+        subres2 = self.quant(subres2)
+
+        res = self.ff.add(subres0, subres1)
+        res = self.ff.add(res, subres2) # (batch_size, c_seq_len, q_seq_len)
         return res
 
 
-class WeightedPool(nn.Module):
-    def __init__(self, dim):
-        super(WeightedPool, self).__init__()
+class QWeightedPool(nn.Module):
+    def __init__(self, dim, quant, dequant):
+        super(QWeightedPool, self).__init__()
         weight = torch.empty(dim, 1)
         nn.init.xavier_uniform_(weight)
         self.weight = nn.Parameter(weight, requires_grad=True)
+        self.quant = quant
+        self.dequant = dequant
 
     def forward(self, x, mask):
+        x_float = self.dequant(x)
         alpha = torch.tensordot(
-            x, self.weight, dims=1
+            x_float, self.weight, dims=1
         )  # shape = (batch_size, seq_length, 1)
-        alpha = mask_logits(alpha, mask=mask.unsqueeze(2))
+        alpha = qmask_logits(alpha, mask.unsqueeze(2), self.quant, self.dequant)
         alphas = nn.Softmax(dim=1)(alpha)
-        pooled_x = torch.matmul(x.transpose(1, 2), alphas)  # (batch_size, dim, 1)
-        pooled_x = pooled_x.squeeze(2)
+        pooled_x = torch.matmul(x_float.transpose(1, 2), alphas)  # (batch_size, dim, 1)
+        pooled_x = self.quant(pooled_x.squeeze(2))
         return pooled_x
 
 
-class CQConcatenate(nn.Module):
-    def __init__(self, dim):
-        super(CQConcatenate, self).__init__()
-        self.weighted_pool = WeightedPool(dim=dim)
+class QCQConcatenate(nn.Module):
+    def __init__(self, dim, quant, dequant):
+        super(QCQConcatenate, self).__init__()
+        self.quant = quant
+        self.dequant = dequant
+        self.ff = FloatFunctional()
+
+        super(QCQConcatenate, self).__init__()
+        self.weighted_pool = QWeightedPool(dim=dim, quant=quant, dequant=dequant)
         self.conv1d = Conv1D(
             in_dim=2 * dim, out_dim=dim, kernel_size=1, stride=1, padding=0, bias=True
         )
 
     def forward(self, context, query, q_mask):
-        pooled_query = self.weighted_pool(query, q_mask)  # (batch_size, dim)
+        pooled_query = self.weighted_pool(self.dequant(query), self.dequant(q_mask))  # (batch_size, dim)
+        pooled_query = self.quant(pooled_query)
         _, c_seq_len, _ = context.shape
         pooled_query = pooled_query.unsqueeze(1).repeat(
             1, c_seq_len, 1
         )  # (batch_size, c_seq_len, dim)
-        output = torch.cat(
+        output = self.ff.cat(
             [context, pooled_query], dim=2
         )  # (batch_size, c_seq_len, 2*dim)
         output = self.conv1d(output)
         return output
 
 
-class HighLightLayer(nn.Module):
-    def __init__(self, dim):
-        super(HighLightLayer, self).__init__()
+class QHighLightLayer(nn.Module):
+    def __init__(self, dim, quant, dequant):
+        super(QHighLightLayer, self).__init__()
         self.conv1d = Conv1D(
             in_dim=dim, out_dim=1, kernel_size=1, stride=1, padding=0, bias=True
         )
+        self.quant = quant
+        self.dequant = dequant
 
     def forward(self, x, mask):
         # compute logits
         logits = self.conv1d(x)
         logits = logits.squeeze(2)
-        logits = mask_logits(logits, mask)
+        logits = qmask_logits(logits, mask, self.quant, self.dequant)
         # compute score
-        scores = nn.Sigmoid()(logits)
+        scores = self.quant(nn.Sigmoid()(self.dequant(logits)))
         return scores
 
     @staticmethod
@@ -487,9 +542,9 @@ class HighLightLayer(nn.Module):
         return loss
 
 
-class DynamicRNN(nn.Module):
-    def __init__(self, dim):
-        super(DynamicRNN, self).__init__()
+class QDynamicRNN(nn.Module):
+    def __init__(self, dim, quant, dequant):
+        super(QDynamicRNN, self).__init__()
         self.lstm = nn.LSTM(
             input_size=dim,
             hidden_size=dim,
@@ -500,24 +555,29 @@ class DynamicRNN(nn.Module):
         )
 
     def forward(self, x, mask):
-        out, _ = self.lstm(x)  # (bsz, seq_len, dim)
+        out, _ = self.lstm(self.dequant(x))  # (bsz, seq_len, dim)
         mask = mask.type(torch.float32)
         mask = mask.unsqueeze(2)
         out = out * mask
-        return out
+        return self.quant(out)
 
 
-class ConditionedPredictor(nn.Module):
-    def __init__(self, dim, num_heads, max_pos_len, drop_rate=0.0, predictor="rnn"):
-        super(ConditionedPredictor, self).__init__()
+class QConditionedPredictor(nn.Module):
+    def __init__(self, dim, num_heads, max_pos_len, quant, dequant, drop_rate=0.0, predictor="rnn"):
+        super(QConditionedPredictor, self).__init__()
+        self.quant = quant
+        self.dequant = dequant
+        self.ff = FloatFunctional()
         self.predictor = predictor
         if predictor == "rnn":
-            self.start_encoder = DynamicRNN(dim=dim)
-            self.end_encoder = DynamicRNN(dim=dim)
+            self.start_encoder = QDynamicRNN(dim=dim, quant=quant, dequant=dequant)
+            self.end_encoder = QDynamicRNN(dim=dim, quant=quant, dequant=dequant)
         else:
-            self.encoder = FeatureEncoder(
+            self.encoder = QFeatureEncoder(
                 dim=dim,
                 num_heads=num_heads,
+                quant=quant,
+                dequant=dequant,
                 kernel_size=7,
                 num_layers=4,
                 max_pos_len=max_pos_len,
@@ -562,14 +622,15 @@ class ConditionedPredictor(nn.Module):
         else:
             start_features = self.encoder(x, mask)
             end_features = self.encoder(start_features, mask)
-            start_features = self.start_layer_norm(start_features)
-            end_features = self.end_layer_norm(end_features)
+            
+            start_features = self.quant(self.start_layer_norm(self.dequant(start_features)))
+            end_features = self.quant(self.end_layer_norm(self.dequant(end_features)))
         start_features = self.start_block(
-            torch.cat([start_features, x], dim=2)
+            self.ff.cat([start_features, x], dim=2)
         )  # (batch_size, seq_len, 1)
-        end_features = self.end_block(torch.cat([end_features, x], dim=2))
-        start_logits = mask_logits(start_features.squeeze(2), mask=mask)
-        end_logits = mask_logits(end_features.squeeze(2), mask=mask)
+        end_features = self.end_block(self.ff.cat([end_features, x], dim=2))
+        start_logits = qmask_logits(start_features.squeeze(2), mask=mask, quant=self.quant, dequant=self.dequant)
+        end_logits = qmask_logits(end_features.squeeze(2), mask=mask, quant=self.quant, dequant=self.dequant)
         return start_logits, end_logits
 
     @staticmethod
@@ -597,25 +658,31 @@ class ConditionedPredictor(nn.Module):
         end_loss = nn.CrossEntropyLoss(reduction="mean")(end_logits, end_labels)
         return start_loss + end_loss
 
-class FiLM(nn.Module):
+class QFiLM(nn.Module):
     """
     A modular Feature-wise Linear Modulation (FiLM) layer that takes:
     - conditioning input: query matrix [B, L_q, d]
     - modulated input: video features [B, L_v, d]
     It outputs FiLM-modulated video features of shape [B, L_v, d].
     """
-    def __init__(self, dim, pooling='mean'):
-        super(FiLM, self).__init__()
+    def __init__(self, dim, quant, dequant, pooling='mean'):
+        super(QFiLM, self).__init__()
         self.dim = dim
         self.pooling = pooling
         self.film_generator = nn.Linear(dim, 2 * dim)
+        self.ff = torch.ao.nn.quantized.FloatFunctional()
+        self.quant = quant
+        self.dequant = dequant
+        
 
     def forward(self, video_feats, query_feats):  # query_mask unused
         """
         video_feats: Tensor of shape [B, L_v, d]
         query_feats: Tensor of shape [B, L_q, d]
         """
+        query_feats = self.dequant(query_feats)
         pooled_query = self.pool_query(query_feats)
+        pooled_query = self.quant(pooled_query)
 
         # Generate FiLM parameters
         gamma_beta = self.film_generator(pooled_query)  # [B, 2d]
@@ -624,8 +691,9 @@ class FiLM(nn.Module):
         # Apply FiLM modulation
         gamma = gamma.unsqueeze(1)  # [B, 1, d]
         beta = beta.unsqueeze(1)    # [B, 1, d]
-
-        return gamma * video_feats + beta  # [B, L_v, d]
+        out = self.ff.mul(video_feats, gamma)
+        out = self.ff.add(out, beta)
+        return out  # [B, L_v, d]
 
     def pool_query(self, query_feats):
         if self.pooling == 'mean':

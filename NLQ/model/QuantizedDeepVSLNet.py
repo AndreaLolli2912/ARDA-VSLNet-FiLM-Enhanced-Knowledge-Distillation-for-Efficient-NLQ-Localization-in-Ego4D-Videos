@@ -5,17 +5,17 @@ import torch
 import torch.nn as nn
 from torch.quantization import QuantStub, DeQuantStub
 
-from model.DeepVSLNet import DeepVSLNet
 from model.layers import (
     Embedding,
-    VisualProjection,
-    FeatureEncoder,
-    CQAttention,
-    CQConcatenate,
-    ConditionedPredictor,
-    HighLightLayer,
-    BertEmbedding,
-    FiLM,
+    VisualProjection
+)
+
+from model.qlayers import (
+    QFeatureEncoder,
+    QCQAttention,
+    QCQConcatenate,
+    QHighLightLayer,
+    QConditionedPredictor
 )
 
 
@@ -52,29 +52,57 @@ def build_optimizer_and_scheduler(model, configs):
     return optimizer, scheduler
 
 class QuantizedDeepVSLNet(nn.Module):
-    def __init__(self, base_model: DeepVSLNet):
+    def __init__(self, configs, word_vectors):
         super().__init__()
-        self.configs = base_model.configs
+        self.configs = configs
 
-        self.video_quant = QuantStub()
-        self.query_quant = QuantStub()
+        self.quant = QuantStub()
         self.dequant = DeQuantStub()
 
-        self.video_affine = base_model.video_affine
-        self.embedding_net = base_model.embedding_net
-        self.feature_encoder = base_model.feature_encoder
-        self.cq_attention = base_model.cq_attention
-        self.cq_concat = base_model.cq_concat
-        self.highlight_layer = base_model.highlight_layer
-        self.predictor = base_model.predictor
+        self.video_affine = VisualProjection(
+            visual_dim=configs.video_feature_dim,
+            dim=configs.dim,
+            drop_rate=configs.drop_rate,
+        )
+        self.embedding_net = Embedding(
+                num_words=configs.word_size,
+                num_chars=configs.char_size,
+                out_dim=configs.dim,
+                word_dim=configs.word_dim,
+                char_dim=configs.char_dim,
+                word_vectors=word_vectors,
+                drop_rate=configs.drop_rate,
+        )
+        self.feature_encoder = QFeatureEncoder(
+            dim=configs.dim,
+            num_heads=configs.num_heads,
+            kernel_size=7,
+            num_layers=4,
+            max_pos_len=configs.max_pos_len,
+            drop_rate=configs.drop_rate,
+            quant=self.quant,
+            dequant=self.dequant
+        )
+        self.cq_attention = QCQAttention(dim=configs.dim, drop_rate=configs.drop_rate, quant=self.quant, dequant=self.dequant)
+        self.cq_concat = QCQConcatenate(dim=configs.dim, quant=self.quant, dequant=self.dequant)
+        self.highlight_layer = QHighLightLayer(dim=configs.dim, quant=self.quant, dequant=self.dequant)
+        self.predictor = QConditionedPredictor(
+            dim=configs.dim,
+            num_heads=configs.num_heads,
+            drop_rate=configs.drop_rate,
+            max_pos_len=configs.max_pos_len,
+            predictor=configs.predictor,
+            quant=self.quant,
+            dequant=self.dequant
+        )
 
     def forward(self, word_ids, char_ids, video_features, v_mask, q_mask):
         
-        video_features = self.video_quant(video_features)
+        video_features = self.quant(video_features)
         video_features = self.video_affine(video_features)
         
         query_features = self.embedding_net(word_ids, char_ids)
-        query_features = self.query_quant(query_features)
+        query_features = self.quant(query_features)
 
         query_features = self.feature_encoder(query_features, mask=q_mask)
 
@@ -95,19 +123,19 @@ class QuantizedDeepVSLNet(nn.Module):
         return self.dequant(h_score), self.dequant(start_logits), self.dequant(end_logits)
 
     def extract_index(self, start_logits, end_logits):
-        return self.predictor.extract_index(
-            start_logits=start_logits, end_logits=end_logits
-            )
+        return self.quant(self.predictor.extract_index(
+            start_logits=self.dequant(start_logits), end_logits=self.dequant(end_logits)
+            ))
 
     def compute_highlight_loss(self, scores, labels, mask):
-        return self.highlight_layer.compute_loss(
-            scores=scores, labels=labels, mask=mask
-            )
+        return self.quant(self.highlight_layer.compute_loss(
+            scores=self.dequant(scores), labels=self.dequant(labels), mask=self.dequant(mask)
+            ))
 
     def compute_loss(self, start_logits, end_logits, start_labels, end_labels):
-        return self.predictor.compute_cross_entropy_loss(
-            start_logits=start_logits,
-            end_logits=end_logits,
-            start_labels=start_labels,
-            end_labels=end_labels,
-            )
+        return self.quant(self.predictor.compute_cross_entropy_loss(
+            start_logits=self.dequant(start_logits),
+            end_logits=self.dequant(end_logits),
+            start_labels=self.dequant(start_labels),
+            end_labels=self.dequant(end_labels),
+            ))

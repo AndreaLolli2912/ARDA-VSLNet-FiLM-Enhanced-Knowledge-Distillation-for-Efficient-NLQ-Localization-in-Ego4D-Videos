@@ -440,14 +440,16 @@ class WeightedPool(nn.Module):
 
 
 class CQConcatenate(nn.Module):
-    def __init__(self, dim):
+    def __init__(self, dim, quant, dequant):
         super(CQConcatenate, self).__init__()
+
         self.weighted_pool = WeightedPool(dim=dim)
         self.conv1d = Conv1D(
             in_dim=2 * dim, out_dim=dim, kernel_size=1, stride=1, padding=0, bias=True
         )
 
     def forward(self, context, query, q_mask):
+
         pooled_query = self.weighted_pool(query, q_mask)  # (batch_size, dim)
         _, c_seq_len, _ = context.shape
         pooled_query = pooled_query.unsqueeze(1).repeat(
