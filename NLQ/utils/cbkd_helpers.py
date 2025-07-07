@@ -4,6 +4,7 @@ from copy import deepcopy
 import torch
 from torch import nn
 from torch.nn import ModuleDict
+import torch.nn.functional as F
 from transformers import get_linear_schedule_with_warmup
 from utils.runner_utils import convert_length_to_mask
 from utils.cbkd_config import CBKDConfig
@@ -425,18 +426,30 @@ def run_cbkd_stage(
             video_mask = convert_length_to_mask(vfeat_lens).to(device)
 
             # Forward through full student_i
-            h_score, start_logits, end_logits = student_i(
+            student_h_score, student_start_logits, student_end_logits = student_i(
                 word_ids, char_ids, vfeats, video_mask, query_mask
             )
 
             # Compute head‐only losses (highlight + start/end CE)
-            loc_loss = student_i.compute_loss(
-                start_logits, end_logits, s_labels, e_labels
+            student_loc_loss = student_i.compute_loss(
+                student_start_logits, student_end_logits, s_labels, e_labels
             )
-            highlight_loss = student_i.compute_highlight_loss(
-                h_score, h_labels, video_mask
+            student_highlight_loss = student_i.compute_highlight_loss(
+                student_h_score, h_labels, video_mask
             )
-            total_loss = loc_loss + configs.highlight_lambda * highlight_loss
+            student_total_loss = student_loc_loss + configs.highlight_lambda * student_highlight_loss
+
+            with torch.no_grad():
+                teacher.eval()
+                teacher_h_score, teacher_start_logits, teacher_end_logits = student_i(
+                    word_ids, char_ids, vfeats, video_mask, query_mask
+                )
+            def kd_kl(student_logits, teacher_logits):
+                return F.kl_div(
+                    F.log_softmax(student_logits / T, dim=-1),
+                    F.softmax(teacher_logits / T,  dim=-1),
+                    reduction="batchmean"
+                ) * (T ** 2)
 
             optimizer.zero_grad()
             total_loss.backward()
