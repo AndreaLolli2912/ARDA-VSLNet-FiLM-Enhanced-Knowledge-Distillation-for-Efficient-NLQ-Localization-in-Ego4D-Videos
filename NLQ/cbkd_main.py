@@ -112,7 +112,10 @@ def main(configs, parser):
     # load pretrained teacher checkpoint here
     model_dir_teacher = configs.model_dir_teacher
     filename = get_last_checkpoint(model_dir_teacher, suffix="t7")
-    teacher.load_state_dict(torch.load(filename))
+    state_dict = torch.load(filename)
+    state_dict.pop("linear_modulation.film_generator.weight", None)
+    state_dict.pop("linear_modulation.film_generator.bias", None)
+    teacher.load_state_dict(state_dict)
 
     # Bottom‐up Stage‐by‐stage distillation
     student_i = None
