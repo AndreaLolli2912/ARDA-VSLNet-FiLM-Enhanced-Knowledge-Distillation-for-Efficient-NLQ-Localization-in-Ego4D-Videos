@@ -178,6 +178,12 @@ def main(configs, parser):
                     )
                 # generate mask
                 video_mask = convert_length_to_mask(vfeat_lens).to(device)
+
+                print("video feats :", vfeats.shape)
+                print("word ids    :", word_ids.shape)
+                print("char ids    :", char_ids.shape)
+                print("max T in batch :", vfeat_lens.max())
+
                 # compute logits
                 if configs.model_name in ["vslnet", "deepvslnet", "teachercbkd"]:
                     h_score, start_logits, end_logits = model(

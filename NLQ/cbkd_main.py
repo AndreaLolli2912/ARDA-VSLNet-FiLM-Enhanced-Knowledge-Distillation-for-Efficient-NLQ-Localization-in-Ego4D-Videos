@@ -95,7 +95,7 @@ def main(configs, parser):
         writer = SummaryWriter(log_dir=log_dir)
 
     # train and test
-  
+
     if not os.path.exists(model_dir):
         os.makedirs(model_dir)
     eval_period = num_train_batches // 2
