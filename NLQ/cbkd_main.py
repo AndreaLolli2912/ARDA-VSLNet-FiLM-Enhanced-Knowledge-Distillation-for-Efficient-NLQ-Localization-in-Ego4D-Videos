@@ -191,6 +191,12 @@ def main(configs, parser):
             )
             # generate mask
             video_mask = convert_length_to_mask(vfeat_lens).to(device)
+
+            print("video feats :", vfeats.shape)
+            print("word ids    :", word_ids.shape)
+            print("char ids    :", char_ids.shape)
+            print("max T in batch :", vfeat_lens.max())
+
             # compute logits
             stu_h, stu_s, stu_e = student_i(
                 word_ids, char_ids, vfeats, video_mask, query_mask
