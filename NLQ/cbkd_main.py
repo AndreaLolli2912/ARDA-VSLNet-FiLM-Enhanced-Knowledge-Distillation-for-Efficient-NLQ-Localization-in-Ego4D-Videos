@@ -7,7 +7,7 @@ import numpy as np
 import options
 import torch
 import torch.nn as nn
-from torch.nn.functional import F
+import torch.nn.functional as F
 import submitit
 from torch.utils.tensorboard.writer import SummaryWriter
 import nltk
