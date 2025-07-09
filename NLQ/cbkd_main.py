@@ -197,22 +197,31 @@ def main(configs, parser):
             video_mask = convert_length_to_mask(vfeat_lens).to(device)
 
             if configs.compute_gflops:
-                teacher_macs, _ = profile(
-                    teacher,
-                    inputs=(word_ids, char_ids, vfeats, video_mask, query_mask),
-                    verbose=False,
-                )
 
-                student_i_macs, _ = profile(
-                    teacher,
-                    inputs=(word_ids, char_ids, vfeats, video_mask, query_mask),
-                    verbose=False,
-                )
-                student_i_gflops_real = 2 * student_i_macs / 1e9
-                teacher_gflops_real = 2 * teacher_macs / 1e9
+                teacher.eval()
+                student_i.eval()
+                vfeats_1      = vfeats[:1]
+                vfeat_lens_1  = vfeat_lens[:1]
+                word_ids_1    = word_ids[:1] if not isinstance(word_ids, dict) else {k:v[:1] for k,v in word_ids.items()}
+                char_ids_1    = char_ids[:1]
+                video_mask_1  = video_mask[:1]
+                query_mask_1  = query_mask[:1]
+                with torch.no_grad():
+                    teacher_macs, _  = profile(
+                        teacher,
+                        inputs=(word_ids_1, char_ids_1, vfeats_1, video_mask_1, query_mask_1)
+                    )
+                    student_macs, _  = profile(
+                        student_i,
+                        inputs=(word_ids_1, char_ids_1, vfeats_1, video_mask_1, query_mask_1)
+                    )
 
-                print(f"Student GFLOPs with real batch shapes: {student_i_gflops_real:.2f}")
-                print(f"Teacher GFLOPs with real batch shapes: {teacher_gflops_real:.2f}")
+                teacher_gflops = 2 * teacher_macs  / 1e9
+                student_gflops = 2 * student_macs  / 1e9
+
+                print(f"Teacher GFLOPs: {teacher_gflops:.2f}")
+                print(f"Student GFLOPs: {student_gflops:.2f}")
+                print(f"Compute reduction: {100*(1-student_gflops/teacher_gflops):.2f}%")
 
             # compute logits
             stu_h, stu_s, stu_e = student_i(
