@@ -26,10 +26,6 @@ def unfreeze_module(module: nn.Module):
         param.requires_grad = True
 
 def make_pruned_ds_block(teacher_ds_block: nn.Module, keep_ratio: float) -> nn.Module:
-    """
-    Wraps a DepthwiseSeparableConvBlock(dim=128, …) so that internally it runs at
-    floor(dim * keep_ratio) channels, but externally still takes/returns (batch, seq_len, 128).
-    """
 
     # 1) Grab original DS parameters
     orig_dim    = teacher_ds_block.depthwise_separable_conv[0][0].in_channels
@@ -37,7 +33,7 @@ def make_pruned_ds_block(teacher_ds_block: nn.Module, keep_ratio: float) -> nn.M
     drop_rate   = teacher_ds_block.dropout.p
     num_layers  = len(teacher_ds_block.depthwise_separable_conv)
 
-    # 2) Compute new (smaller) “internal” channel count
+    # 2) Compute new channel count
     new_dim = max(1, int(orig_dim * keep_ratio))
 
     # 3) Build adapters + smaller DS block
@@ -58,10 +54,9 @@ def make_pruned_ds_block(teacher_ds_block: nn.Module, keep_ratio: float) -> nn.M
             self.up    = up
 
         def forward(self, x):
-            # x: (batch, seq_len, orig_dim=128)
-            z = self.down(x)      # → (batch, seq_len, new_dim)
-            z = self.inner(z)     # → (batch, seq_len, new_dim)
-            z = self.up(z)        # → (batch, seq_len, orig_dim=128)
+            z = self.down(x)
+            z = self.inner(z)
+            z = self.up(z)
             return z
 
     return PrunedDSWrapper(down_adapter, pruned_inner, up_adapter)
@@ -97,12 +92,9 @@ def make_pruned_conv1d(orig_conv: nn.Conv1d, keep_ratio: float) -> nn.Sequential
     nn.init.zeros_(adapter_down.bias)
 
     # 2) Pruned K×K convolution: in_kept -> out_kept
-    #    If orig_conv was depthwise (groups == C_in), use groups=in_kept; otherwise groups=1.
     if orig_conv.groups == C_in:
-        # Depthwise case (orig_conv was Conv1d(dim, dim, kernel_size=K, groups=dim))
         pruned_groups = in_kept
     else:
-        # Standard or grouped conv → collapse to a single group
         pruned_groups = 1
 
     pruned_conv = nn.Conv1d(
@@ -121,7 +113,7 @@ def make_pruned_conv1d(orig_conv: nn.Conv1d, keep_ratio: float) -> nn.Sequential
     nn.init.xavier_uniform_(adapter_up.weight)
     nn.init.zeros_(adapter_up.bias)
 
-    # Initialize pruned_conv weights by slicing teacher weights (optional)
+    # Initialize pruned_conv weights by slicing teacher weights
     with torch.no_grad():
         W = orig_conv.weight.data  # shape: [C_out, C_in, K]
         b = orig_conv.bias.data if orig_conv.bias is not None else None
@@ -157,12 +149,12 @@ def prune_block2(
 
     # 1) Deep‐copy
     pruned_featenc = deepcopy(encoder_block2)
-    # ── A) Prune the DS block ─────────────────────────────────────────────────
+    # A) Prune the DS block
     orig_ds = pruned_featenc.conv_block  # DepthwiseSeparableConvBlock(dim=128,…)
     pruned_ds = make_pruned_ds_block(orig_ds, keep_ratio=keep_ratio_ds)
     pruned_featenc.conv_block = pruned_ds
 
-    # ── B) Prune each Conv1d inside attention_block ────────────────────────────
+    # B) Prune each Conv1d inside attention_block
     attn = pruned_featenc.attention_block
     for attr in ("query", "key", "value", "out_layer"):
         orig_layer = getattr(attn, attr)      # Conv1D wrapper
@@ -193,19 +185,19 @@ def prune_block3(
 
     pruned_block3 = deepcopy(teacher_block3)
 
-    # 1) Prune CQAttention.cqa_linear.conv1d  (Conv1d(4*dim → dim))
+    # 1) Prune CQAttention.cqa_linear.conv1d 
     cq_attn = pruned_block3["cq_attention"]
-    orig_cqa = cq_attn.cqa_linear.conv1d  # nn.Conv1d(4*dim → dim)
+    orig_cqa = cq_attn.cqa_linear.conv1d  
     pruned_cqa = make_pruned_conv1d(orig_cqa, keep_ratio=keep_ratio_cqa)
     cq_attn.cqa_linear.conv1d = pruned_cqa
 
-    # 2) Prune CQConcatenate.conv1d.conv1d  (Conv1d(2*dim → dim))
+    # 2) Prune CQConcatenate.conv1d.conv1d  
     cq_concat = pruned_block3["cq_concat"]
-    orig_concat = cq_concat.conv1d.conv1d  # nn.Conv1d(2*dim → dim)
+    orig_concat = cq_concat.conv1d.conv1d  
     pruned_concat = make_pruned_conv1d(orig_concat, keep_ratio=keep_ratio_concat)
     cq_concat.conv1d.conv1d = pruned_concat
 
-    # 3) Leave HighLightLayer.conv1d unchanged  (Conv1d(dim → 1))
+    # 3) Leave HighLightLayer.conv1d unchanged
 
     return pruned_block3
 
@@ -231,10 +223,8 @@ def prune_block4(
     pruned_block4 = deepcopy(teacher_block4)
     predictor_mod = pruned_block4.predictor
 
-    # ── A) Prune the internal FeatureEncoder inside ConditionedPredictor ───────
-    #    (This is exactly the same logic as Block 2’s prune_block2, except we use
-    #    keep_ratio_ds=keep_ratio_enc and keep_ratio_attn=keep_ratio_enc.)
-    orig_encoder = predictor_mod.encoder  # a FeatureEncoder(dim=128,…)
+    # A) Prune the internal FeatureEncoder inside ConditionedPredictor
+    orig_encoder = predictor_mod.encoder
     pruned_encoder = prune_block2(
         orig_encoder,
         keep_ratio_ds   = keep_ratio_enc,
@@ -242,18 +232,14 @@ def prune_block4(
     )
     predictor_mod.encoder = pruned_encoder
 
-    # ── B) Prune start_block’s two Conv1D layers ───────────────────────────────
-    #    start_block = Sequential( Conv1D(2·dim→dim), ReLU, Conv1D(dim→1) )
+    # B) Prune start_block’s two Conv1D layers
     start_seq = predictor_mod.start_block
-    #   - start_seq[0] is a Conv1D wrapper whose .conv1d is nn.Conv1d(2*128→128)
-    #   - start_seq[2] is a Conv1D wrapper whose .conv1d is nn.Conv1d(128→1)
     orig_s1 = start_seq[0].conv1d
     orig_s2 = start_seq[2].conv1d
     start_seq[0].conv1d = make_pruned_conv1d(orig_s1, keep_ratio=keep_ratio_pred)
     start_seq[2].conv1d = make_pruned_conv1d(orig_s2, keep_ratio=keep_ratio_pred)
 
-    # ── C) Prune end_block’s two Conv1D layers ─────────────────────────────────
-    #    end_block = Sequential( Conv1D(2·dim→dim), ReLU, Conv1D(dim→1) )
+    # C) Prune end_block’s two Conv1D layers
     end_seq = predictor_mod.end_block
     orig_e1 = end_seq[0].conv1d
     orig_e2 = end_seq[2].conv1d

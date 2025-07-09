@@ -612,7 +612,7 @@ class FiLM(nn.Module):
         self.pooling = pooling
         self.film_generator = nn.Linear(dim, 2 * dim)
 
-    def forward(self, video_feats, query_feats):  # query_mask unused
+    def forward(self, video_feats, query_feats):  
         """
         video_feats: Tensor of shape [B, L_v, d]
         query_feats: Tensor of shape [B, L_q, d]
@@ -631,8 +631,8 @@ class FiLM(nn.Module):
 
     def pool_query(self, query_feats):
         if self.pooling == 'mean':
-            return query_feats.mean(dim=1)  # simple mean pooling over L_q
+            return query_feats.mean(dim=1)
         elif self.pooling == 'cls':
-            return query_feats[:, 0, :]     # assumes CLS token at position 0
+            return query_feats[:, 0, :]
         else:
             raise ValueError(f"Unsupported pooling method: {self.pooling}")

@@ -7,7 +7,7 @@ class CBKDConfig:
     Edit these once here if you want to change the overall compression schedule.
     """
 
-    # ── KEEP RATIOS ────────────────────────────────────────────────────────────
+    # keep ratios
     # Block 2: ~25% parameter reduction → keep 75% channels internally
     keep_ratio_block2_ds:    float = 0.1
     keep_ratio_block2_attn:  float = 0.1
@@ -20,23 +20,22 @@ class CBKDConfig:
     keep_ratio_block4_enc:   float = 0.05
     keep_ratio_block4_pred:  float = 0.05
 
-    # ── LEARNING RATES ──────────────────────────────────────────────────────────
+    # learning rates
     lr_block2: float = 0.0005
     lr_block3: float = 0.0005
     lr_block4: float = 0.0005
     lr_finetune: float = 0.0005
 
-    # ── EPOCH COUNTS ────────────────────────────────────────────────────────────
+    # epochs count
     epochs_block2: int = 30
     epochs_block3: int = 15
     epochs_block4: int = 30
     epochs_finetune: int = 30
 
-    # ── OTHER TRAINING FLAGS ───────────────────────────────────────────────────
-    finetune_all: bool = True # whether to run the final full‐model tuning step
+    # other
+    finetune_all: bool = True 
 
-
-    # ── LOSS HYPERPARAMETERS ───────────────────────────────────────────────────
+    # loss hyperparameters
     temperature: float = 2
     alpha_kd: float = 1
     beta_hl_kd: float = 0.25
