@@ -96,7 +96,6 @@ def main(configs, parser):
         writer = SummaryWriter(log_dir=log_dir)
 
     # train and test
-
     if not os.path.exists(model_dir):
         os.makedirs(model_dir)
     eval_period = num_train_batches // 2
@@ -146,11 +145,7 @@ def main(configs, parser):
 
     optimizer, scheduler = build_optimizer_and_scheduler(model=student_i, configs=configs)
     
-    # print(student_i.block2, flush=True)
-    # print(student_i.block3, flush=True)
-    # print(student_i.block4, flush=True)
-
-    # 3.4) Training loop for thawing stage (highlight + CE only)
+    # Training loop for thawing stage (highlight + CE only)
     best_metric = -1.0
     score_writer = open(
         os.path.join(model_dir, "eval_results.txt"), mode="w", encoding="utf-8"
