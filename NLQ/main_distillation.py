@@ -31,7 +31,7 @@ def main(configs, parser):
     # TODO metterli come hyperpar
     feature_map_weight = configs.feature_map_weight
     ce_loss_weight = configs.ce_loss_weight
-    distill_weight_loss = configs.distill_weight_loss
+    weight_highlight_distillation_loss = configs.distill_weight_loss
 
     # set tensorflow configs
     set_th_config(configs.seed)
@@ -198,7 +198,7 @@ def main(configs, parser):
 
                 highlight_distill_loss = mse_loss(h_score_student, h_score_teacher)
 
-                total_loss = loc_loss + configs.highlight_lambda * highlight_loss + highlight_distill_loss*distill_weight_loss
+                total_loss = loc_loss + configs.highlight_lambda * highlight_loss + highlight_distill_loss*weight_highlight_distillation_loss
                 total_loss = feature_map_weight*teacher_loss + ce_loss_weight*total_loss
                 
                 # compute and apply gradients
