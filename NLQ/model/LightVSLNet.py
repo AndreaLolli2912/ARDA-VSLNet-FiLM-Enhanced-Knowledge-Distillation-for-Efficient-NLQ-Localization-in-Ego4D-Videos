@@ -49,7 +49,7 @@ def build_optimizer_and_scheduler(model, configs):
     )
     return optimizer, scheduler
 
-#modifiche: feature_encoder num_layers 4 -> 1
+#feature_encoder num_layers 4 -> 1
 class LightVSLNet(nn.Module):
     def __init__(self, configs, word_vectors):
         super(LightVSLNet, self).__init__()
