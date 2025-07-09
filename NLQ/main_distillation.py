@@ -31,7 +31,7 @@ def main(configs, parser):
     # TODO metterli come hyperpar
     feature_map_weight = configs.feature_map_weight
     ce_loss_weight = configs.ce_loss_weight
-    weight_highlight_distillation_loss = configs.distill_weight_loss
+    weight_highlight_distillation_loss = configs.weight_highlight_distillation_loss
 
     # set tensorflow configs
     set_th_config(configs.seed)
