@@ -206,14 +206,12 @@ def main(configs, parser):
                     teacher,
                     inputs=(word_ids, char_ids, vfeats, video_mask, query_mask),
                     verbose=False,
-                    strict=False,          # skip any op thop can't parse
                 )
 
                 student_i_macs, _ = profile(
                     teacher,
                     inputs=(word_ids, char_ids, vfeats, video_mask, query_mask),
                     verbose=False,
-                    strict=False,          # skip any op thop can't parse
                 )
                 student_i_gflops_real = 2 * student_i_macs / 1e9
                 teacher_gflops_real = 2 * teacher_macs / 1e9
