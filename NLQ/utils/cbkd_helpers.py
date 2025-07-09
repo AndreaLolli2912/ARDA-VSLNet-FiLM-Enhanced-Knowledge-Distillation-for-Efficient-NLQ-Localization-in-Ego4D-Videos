@@ -215,7 +215,7 @@ def prune_block4(
     keep_ratio_pred: float
 ) -> nn.Module:
     """
-    Prune Block 4 = ConditionedPredictor (transformer style).  This:
+    Prune Block 4 = ConditionedPredictor.
       A) Replaces `predictor.encoder` (a FeatureEncoder) with prune_block2(..., keep_ratio_enc, keep_ratio_enc)
       B) Replaces each Conv1D inside start_block and end_block via make_pruned_conv1d(..., keep_ratio_pred)
 
