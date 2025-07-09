@@ -219,6 +219,8 @@ def main(configs, parser):
                 teacher_gflops = 2 * teacher_macs  / 1e9
                 student_gflops = 2 * student_macs  / 1e9
 
+                student_i.train()
+
                 print(f"Teacher GFLOPs: {teacher_gflops:.2f}")
                 print(f"Student GFLOPs: {student_gflops:.2f}")
                 print(f"Compute reduction: {100*(1-student_gflops/teacher_gflops):.2f}%")
