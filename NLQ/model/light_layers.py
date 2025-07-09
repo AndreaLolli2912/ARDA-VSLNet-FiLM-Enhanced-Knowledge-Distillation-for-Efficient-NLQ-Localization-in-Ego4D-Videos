@@ -504,7 +504,7 @@ class ConditionedPredictor(nn.Module):
                 dim=dim,
                 num_heads=num_heads,
                 kernel_size=7,
-                num_layers=1,
+                num_layers=4,
                 max_pos_len=max_pos_len,
                 drop_rate=drop_rate,
             )
