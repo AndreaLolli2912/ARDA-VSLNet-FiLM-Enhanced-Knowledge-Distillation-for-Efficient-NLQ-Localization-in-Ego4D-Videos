@@ -7,6 +7,7 @@ import numpy as np
 import options
 import torch
 import torch.nn as nn
+from thop import profile
 import submitit
 from torch.utils.tensorboard.writer import SummaryWriter
 import nltk
@@ -172,7 +173,35 @@ def main(configs, parser):
                     )
                 # generate mask
                 video_mask = convert_length_to_mask(vfeat_lens).to(device)
-                # compute logits
+                
+                if configs.compute_gflops:
+
+                    teacher.eval()
+                    student.eval()
+                    vfeats_1      = vfeats[:1]
+                    vfeat_lens_1  = vfeat_lens[:1]
+                    word_ids_1    = word_ids[:1] if not isinstance(word_ids, dict) else {k:v[:1] for k,v in word_ids.items()}
+                    char_ids_1    = char_ids[:1]
+                    video_mask_1  = video_mask[:1]
+                    query_mask_1  = query_mask[:1]
+                    with torch.no_grad():
+                        teacher_macs, _  = profile(
+                            teacher,
+                            inputs=(word_ids_1, char_ids_1, vfeats_1, video_mask_1, query_mask_1)
+                        )
+                        student_macs, _  = profile(
+                            student,
+                            inputs=(word_ids_1, char_ids_1, vfeats_1, video_mask_1, query_mask_1)
+                        )
+
+                    teacher_gflops = 2 * teacher_macs  / 1e9
+                    student_gflops = 2 * student_macs  / 1e9
+
+                    student.train()
+
+                    print(f"Teacher GFLOPs: {teacher_gflops:.2f}")
+                    print(f"Student GFLOPs: {student_gflops:.2f}")
+                    print(f"Compute reduction: {100*(1-student_gflops/teacher_gflops):.2f}%")
                 
                 with torch.no_grad():
                     h_score_teacher, start_logits_teacher, end_logits_teacher = teacher(
