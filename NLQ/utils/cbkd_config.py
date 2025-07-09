@@ -34,3 +34,9 @@ class CBKDConfig:
 
     # ── OTHER TRAINING FLAGS ───────────────────────────────────────────────────
     finetune_all: bool = True # whether to run the final full‐model tuning step
+
+
+    # ── LOSS HYPERPARAMETERS ───────────────────────────────────────────────────
+    temperature: float = 2
+    alpha_kd: float = 1
+    beta_hl_kd: float = 0.25

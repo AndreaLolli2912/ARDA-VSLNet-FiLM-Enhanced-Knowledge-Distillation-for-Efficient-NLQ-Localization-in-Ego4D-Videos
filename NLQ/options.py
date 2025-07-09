@@ -227,5 +227,12 @@ def read_command_line():
         default=None,
         help="A list of splits to remove empty queries from. Valid values for the list are: ['train', 'val']",  # noqa
     )
+
+    parser.add_argument(
+        "--compute_gflops",
+        type=bool,
+        default=False,
+        help="Flag for computing GFLOPS"  
+    )
     configs = parser.parse_args()
     return configs, parser

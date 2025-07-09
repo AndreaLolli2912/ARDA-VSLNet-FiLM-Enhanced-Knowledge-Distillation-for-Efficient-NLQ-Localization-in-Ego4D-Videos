@@ -4,6 +4,7 @@ from copy import deepcopy
 import torch
 from torch import nn
 from torch.nn import ModuleDict
+import torch.nn.functional as F
 from transformers import get_linear_schedule_with_warmup
 from utils.runner_utils import convert_length_to_mask
 from utils.cbkd_config import CBKDConfig
@@ -308,7 +309,7 @@ def run_cbkd_stage(
         block_j = distilled_blocks[j]  # must already exist
         setattr(student_i, f"block{j}", block_j)
         freeze_module(getattr(student_i, f"block{j}"))
-    
+
     # 3) Freeze all blocks shallower than stage_idx
     for j in range(1, stage_idx):
         freeze_module(getattr(student_i, f"block{j}"))
@@ -321,8 +322,7 @@ def run_cbkd_stage(
             keep_ratio_enc  = cbkd_cfg.keep_ratio_block4_enc,
             keep_ratio_pred = cbkd_cfg.keep_ratio_block4_pred
         ).to(device)
-        
-    
+
     elif stage_idx == 3:
         orig_block3 = teacher.block3
         pruned_block_i = prune_block3(
@@ -344,18 +344,18 @@ def run_cbkd_stage(
     else:
         raise ValueError(f"Invalid stage_idx {stage_idx}. Must be in [1..{total_blocks}].")
 
-    
+
     # 3.1) Insert the pruned block_i into student_i
     setattr(student_i, f"block{stage_idx}", pruned_block_i)
-    
+
     # 4) Unfreeze only pruned_block_i (and predictor if stage_idx == 4)
     unfreeze_module(pruned_block_i)
-    
+
     # 5) Build optimizer over exactly the trainable parameters
     no_decay       = ["bias", "layer_norm", "LayerNorm"]
     decay_params   = []
     nodecay_params = []
-    
+
     # Which parameters are trainable at this stage?
     trainable_params = list(pruned_block_i.parameters())
 
@@ -365,7 +365,7 @@ def run_cbkd_stage(
     for n, p in student_i.named_parameters():
         if not n.startswith(prefix):
             continue  # skip params outside the current pruned block
-        
+
         if not p.requires_grad:
             continue  # skip frozen params
 
@@ -392,6 +392,12 @@ def run_cbkd_stage(
         )
     else:
         scheduler = None
+
+    # Loss parameters
+    T          = cbkd_cfg.temperature        # e.g. 2.0
+    alpha_kd   = cbkd_cfg.alpha_kd           # weight on KD term (≈1.0)
+    beta_hl_kd = cbkd_cfg.beta_hl_kd         # weight on highlight-KD (≈0.25)
+    lambda_hl  = configs.highlight_lambda    # your existing highlight weight
 
     # 6) Training loop for this stage (head‐only CBKD)
     global_step = 0
@@ -424,25 +430,49 @@ def run_cbkd_stage(
             )
             video_mask = convert_length_to_mask(vfeat_lens).to(device)
 
-            # Forward through full student_i
-            h_score, start_logits, end_logits = student_i(
+            # forward student_i
+            stu_h, stu_s, stu_e = student_i(
                 word_ids, char_ids, vfeats, video_mask, query_mask
             )
 
             # Compute head‐only losses (highlight + start/end CE)
-            loc_loss = student_i.compute_loss(
-                start_logits, end_logits, s_labels, e_labels
-            )
-            highlight_loss = student_i.compute_highlight_loss(
-                h_score, h_labels, video_mask
-            )
-            total_loss = loc_loss + configs.highlight_lambda * highlight_loss
+            loc_loss = student_i.compute_loss(stu_s, stu_e, s_labels, e_labels)
+            hl_loss  = student_i.compute_highlight_loss(stu_h, h_labels, video_mask)
 
+            # forward teacher (frozen)
+            with torch.no_grad():
+                teacher.eval()
+                tch_h, tch_s, tch_e = teacher(
+                    word_ids, char_ids, vfeats, video_mask, query_mask
+                )
+
+            # KD helper
+            def kd_kl(student_logits, teacher_logits):
+                return F.kl_div(
+                    F.log_softmax(student_logits / T, dim=-1),
+                    F.softmax( teacher_logits / T, dim=-1),
+                    reduction="batchmean"
+                ) * (T ** 2)
+            
+            kd_start = kd_kl(stu_s, tch_s)
+            kd_end   = kd_kl(stu_e, tch_e)
+            kd_hl    = F.binary_cross_entropy_with_logits(
+                        stu_h, torch.sigmoid(tch_h)
+                    )
+            # total CBKD loss
+            total_loss = (
+                loc_loss +
+                lambda_hl * hl_loss +
+                alpha_kd  * (kd_start + kd_end + beta_hl_kd * kd_hl)
+            )
+
+            # optimization
             optimizer.zero_grad()
             total_loss.backward()
             nn.utils.clip_grad_norm_(
                 student_i.parameters(), configs.clip_norm
             )  # clip gradient
+
             optimizer.step()
             if scheduler is not None:
                 scheduler.step()

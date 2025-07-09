@@ -7,6 +7,8 @@ import numpy as np
 import options
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+from thop import profile
 import submitit
 from torch.utils.tensorboard.writer import SummaryWriter
 import nltk
@@ -94,7 +96,7 @@ def main(configs, parser):
         writer = SummaryWriter(log_dir=log_dir)
 
     # train and test
-  
+
     if not os.path.exists(model_dir):
         os.makedirs(model_dir)
     eval_period = num_train_batches // 2
@@ -111,7 +113,10 @@ def main(configs, parser):
     # load pretrained teacher checkpoint here
     model_dir_teacher = configs.model_dir_teacher
     filename = get_last_checkpoint(model_dir_teacher, suffix="t7")
-    teacher.load_state_dict(torch.load(filename))
+    state_dict = torch.load(filename)
+    state_dict.pop("linear_modulation.film_generator.weight", None)
+    state_dict.pop("linear_modulation.film_generator.bias", None)   
+    teacher.load_state_dict(state_dict)
 
     # Bottom‐up Stage‐by‐stage distillation
     student_i = None
@@ -140,14 +145,22 @@ def main(configs, parser):
         unfreeze_module(getattr(student_i, f"block{b_idx}"))
 
     optimizer, scheduler = build_optimizer_and_scheduler(model=student_i, configs=configs)
-    print(student_i.block2, flush=True)
-    print(student_i.block3, flush=True)
-    print(student_i.block4, flush=True)
+    
+    # print(student_i.block2, flush=True)
+    # print(student_i.block3, flush=True)
+    # print(student_i.block4, flush=True)
+
     # 3.4) Training loop for thawing stage (highlight + CE only)
     best_metric = -1.0
     score_writer = open(
         os.path.join(model_dir, "eval_results.txt"), mode="w", encoding="utf-8"
     )
+
+    T          = cbkd_config.temperature
+    alpha_kd   = cbkd_config.alpha_kd
+    beta_hl_kd = cbkd_config.beta_hl_kd
+    lambda_hl  = configs.highlight_lambda
+
     print("start training...", flush=True)
     global_step = 0
     for epoch in range(cbkd_config.epochs_finetune):
@@ -182,19 +195,65 @@ def main(configs, parser):
             )
             # generate mask
             video_mask = convert_length_to_mask(vfeat_lens).to(device)
+
+            print("video feats :", vfeats.shape)
+            print("word ids    :", word_ids.shape)
+            print("char ids    :", char_ids.shape)
+            print("max T in batch :", vfeat_lens.max())
+
+            if configs.compute_gflops:
+                teacher_macs, _ = profile(
+                    teacher,
+                    inputs=(word_ids, char_ids, vfeats, video_mask, query_mask),
+                    verbose=False,
+                    strict=False,          # skip any op thop can't parse
+                )
+
+                student_i_macs, _ = profile(
+                    teacher,
+                    inputs=(word_ids, char_ids, vfeats, video_mask, query_mask),
+                    verbose=False,
+                    strict=False,          # skip any op thop can't parse
+                )
+                student_i_gflops_real = 2 * student_i_macs / 1e9
+                teacher_gflops_real = 2 * teacher_macs / 1e9
+
+                print(f"Student GFLOPs with real batch shapes: {student_i_gflops_real:.2f}")
+                print(f"Teacher GFLOPs with real batch shapes: {teacher_gflops_real:.2f}")
+
             # compute logits
-            h_score, start_logits, end_logits = student_i(
+            stu_h, stu_s, stu_e = student_i(
                 word_ids, char_ids, vfeats, video_mask, query_mask
             )
-
             # compute loss
-            loc_loss = student_i.compute_loss(
-                start_logits, end_logits, s_labels, e_labels
+            loc_loss = student_i.compute_loss(stu_s, stu_e, s_labels, e_labels)
+            hl_loss  = student_i.compute_highlight_loss(stu_h, h_labels, video_mask)
+
+            #  forward treacher
+            with torch.no_grad():
+                teacher.eval()
+                tch_h, tch_s, tch_e = teacher(
+                    word_ids, char_ids, vfeats, video_mask, query_mask
+                )
+
+            # KD helper
+            def kd_kl(student_logits, teacher_logits):
+                return F.kl_div(
+                    F.log_softmax(student_logits / T, dim=-1),
+                    F.softmax( teacher_logits / T, dim=-1),
+                    reduction="batchmean"
+                ) * (T ** 2)
+
+            kd_start = kd_kl(stu_s, tch_s)
+            kd_end   = kd_kl(stu_e, tch_e)
+            kd_hl    = F.binary_cross_entropy_with_logits(
+                        stu_h, torch.sigmoid(tch_h)
             )
-            highlight_loss = student_i.compute_highlight_loss(
-                h_score, h_labels, video_mask
+            total_loss = (
+                loc_loss +
+                lambda_hl * hl_loss +
+                alpha_kd  * (kd_start + kd_end + beta_hl_kd * kd_hl)
             )
-            total_loss = loc_loss + configs.highlight_lambda * highlight_loss
 
             # compute and apply gradients
             optimizer.zero_grad()
@@ -208,8 +267,8 @@ def main(configs, parser):
             if writer is not None and global_step % configs.tb_log_freq == 0:
                 writer.add_scalar("Loss/Total", total_loss.detach().cpu(), global_step)
                 writer.add_scalar("Loss/Loc", loc_loss.detach().cpu(), global_step)
-                writer.add_scalar("Loss/Highlight", highlight_loss.detach().cpu(), global_step)
-                writer.add_scalar("Loss/Highlight (*lambda)", (configs.highlight_lambda * highlight_loss.detach().cpu()), global_step)
+                writer.add_scalar("Loss/Highlight", hl_loss.detach().cpu(), global_step)
+                writer.add_scalar("Loss/Highlight (*lambda)", (configs.highlight_lambda * hl_loss.detach().cpu()), global_step)
                 writer.add_scalar("LR", optimizer.param_groups[0]["lr"], global_step)
 
             # evaluate
