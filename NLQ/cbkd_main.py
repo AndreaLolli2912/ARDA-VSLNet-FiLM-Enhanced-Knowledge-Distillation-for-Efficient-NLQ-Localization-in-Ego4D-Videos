@@ -196,24 +196,17 @@ def main(configs, parser):
             # generate mask
             video_mask = convert_length_to_mask(vfeat_lens).to(device)
 
-            print("video feats :", vfeats.shape)
-            print("word ids    :", word_ids.shape)
-            print("char ids    :", char_ids.shape)
-            print("max T in batch :", vfeat_lens.max())
-
             if configs.compute_gflops:
                 teacher_macs, _ = profile(
                     teacher,
                     inputs=(word_ids, char_ids, vfeats, video_mask, query_mask),
                     verbose=False,
-                    strict=False,          # skip any op thop can't parse
                 )
 
                 student_i_macs, _ = profile(
                     teacher,
                     inputs=(word_ids, char_ids, vfeats, video_mask, query_mask),
                     verbose=False,
-                    strict=False,          # skip any op thop can't parse
                 )
                 student_i_gflops_real = 2 * student_i_macs / 1e9
                 teacher_gflops_real = 2 * teacher_macs / 1e9
