@@ -32,6 +32,8 @@ def main(configs, parser):
     feature_map_weight = configs.feature_map_weight
     ce_loss_weight = configs.ce_loss_weight
     weight_highlight_distillation_loss = configs.weight_highlight_distillation_loss
+    # temperature
+    T = 2
 
     # set tensorflow configs
     set_th_config(configs.seed)
@@ -195,11 +197,18 @@ def main(configs, parser):
                 teacher_end_loss = mse_loss(end_logits_student, end_logits_teacher)
                 teacher_loss = teacher_start_loss + teacher_end_loss
 
-                highlight_distill_loss = mse_loss(h_score_student, h_score_teacher)
-
-                total_loss = loc_loss + configs.highlight_lambda * highlight_loss + highlight_distill_loss*weight_highlight_distillation_loss
-                total_loss = feature_map_weight*teacher_loss + ce_loss_weight*total_loss
+                # highlight_distill_loss = mse_loss(h_score_student, h_score_teacher)
                 
+                soft_targets = nn.functional.softmax(h_score_teacher/T, dim=-1)
+                soft_prob = nn.functional.log_softmax(h_score_student/T, dim=-1)
+                highlight_distill_loss = torch.sum(soft_targets * (soft_targets.log() - soft_prob)) / soft_prob.size()[0] * (T**2)
+
+                loss_span = feature_map_weight*teacher_loss + ce_loss_weight * loc_loss
+                loss_qgh = configs.highlight_lambda * highlight_loss + highlight_distill_loss*weight_highlight_distillation_loss
+
+                # total_loss = loc_loss + configs.highlight_lambda * highlight_loss + highlight_distill_loss*weight_highlight_distillation_loss
+                # total_loss = feature_map_weight*teacher_loss + ce_loss_weight*total_loss
+                total_loss = loss_span + loss_qgh
                 # compute and apply gradients
                 optimizer.zero_grad()
                 total_loss.backward()
