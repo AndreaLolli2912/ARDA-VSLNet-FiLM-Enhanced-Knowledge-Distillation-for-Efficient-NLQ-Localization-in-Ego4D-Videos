@@ -92,6 +92,12 @@ def read_command_line():
         default=5.0,
         help="lambda for highlight region",
     )
+    parser.add_argument(
+        "--temperature_distillation",
+        type=float,
+        default=2.0,
+        help="temperature for loss distillation",
+    )
     parser.add_argument("--num_heads", type=int, default=8, help="number of heads")
     parser.add_argument("--num_heads_student", type=int, default=2, help="number of heads")
     parser.add_argument("--drop_rate", type=float, default=0.2, help="dropout rate")

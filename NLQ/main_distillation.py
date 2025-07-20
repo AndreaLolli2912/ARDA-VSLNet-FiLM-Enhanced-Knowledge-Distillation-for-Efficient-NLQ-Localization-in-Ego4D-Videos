@@ -33,7 +33,7 @@ def main(configs, parser):
     ce_loss_weight = configs.ce_loss_weight
     weight_highlight_distillation_loss = configs.weight_highlight_distillation_loss
     # temperature
-    T = 2
+    temperature_distillation = configs.temperature_distillation
 
     # set tensorflow configs
     set_th_config(configs.seed)
@@ -202,17 +202,17 @@ def main(configs, parser):
                 highlight_distill_loss = torch.sum(highlight_distill_loss * video_mask) / (torch.sum(video_mask) + 1e-12)
 
                 # === Start / End distillation (softmax / temperature) ===
-                soft_targets_start = torch.softmax(start_logits_teacher / T, dim=-1)
-                log_probs_start = torch.log_softmax(start_logits_student / T, dim=-1)
+                soft_targets_start = torch.softmax(start_logits_teacher / temperature_distillation, dim=-1)
+                log_probs_start = torch.log_softmax(start_logits_student / temperature_distillation, dim=-1)
                 teacher_start_loss = torch.sum(
                     soft_targets_start * (soft_targets_start.log() - log_probs_start)
-                ) / (start_logits_student.size(0) * (T ** 2))
+                ) / (start_logits_student.size(0) * (temperature_distillation ** 2))
 
-                soft_targets_end = torch.softmax(end_logits_teacher / T, dim=-1)
-                log_probs_end = torch.log_softmax(end_logits_student / T, dim=-1)
+                soft_targets_end = torch.softmax(end_logits_teacher / temperature_distillation, dim=-1)
+                log_probs_end = torch.log_softmax(end_logits_student / temperature_distillation, dim=-1)
                 teacher_end_loss = torch.sum(
                     soft_targets_end * (soft_targets_end.log() - log_probs_end)
-                ) / (end_logits_student.size(0) * (T ** 2))
+                ) / (end_logits_student.size(0) * (temperature_distillation ** 2))
 
                 teacher_span_loss = teacher_start_loss + teacher_end_loss
 
