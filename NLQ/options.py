@@ -74,15 +74,9 @@ def read_command_line():
     parser.add_argument("--dim", type=int, default=128, help="hidden size")
     parser.add_argument("--dim_student", type=int, default=64, help="hidden size")
     parser.add_argument(
-        "--highlight_lambda",
-        type=float,
-        default=5.0,
-        help="lambda for highlight region",
-    )
-    parser.add_argument(
         "--film_mode",
         type=str,
-        default="before_encoder",
+        default="off",
         choices=[
             "before_encoder", 
             "after_encoder",
@@ -91,7 +85,19 @@ def read_command_line():
             "inside_encoder:after_attn",
             "inside_encoder:multi",
             "off"
-    ])
+        ])
+    parser.add_argument(
+        "--highlight_lambda",
+        type=float,
+        default=5.0,
+        help="lambda for highlight region",
+    )
+    parser.add_argument(
+        "--temperature_distillation",
+        type=float,
+        default=2.0,
+        help="temperature for loss distillation",
+    )
     parser.add_argument("--num_heads", type=int, default=8, help="number of heads")
     parser.add_argument("--num_heads_student", type=int, default=2, help="number of heads")
     parser.add_argument("--drop_rate", type=float, default=0.2, help="dropout rate")
@@ -144,7 +150,7 @@ def read_command_line():
     )
     parser.add_argument("--feature_map_weight", type=float, default=0.25)
     parser.add_argument("--ce_loss_weight", type=float, default=0.75)
-    parser.add_argument("--distill_weight_loss", type=float, default=0.2)
+    parser.add_argument("--weight_highlight_distillation_loss", type=float, default=0.2)
     parser.add_argument("--model_name", type=str, default="vslnet", help="[vslnet | vslbase] model name")  # noqa
     parser.add_argument(
         "--suffix",
@@ -226,6 +232,13 @@ def read_command_line():
         nargs="+",
         default=None,
         help="A list of splits to remove empty queries from. Valid values for the list are: ['train', 'val']",  # noqa
+    )
+
+    parser.add_argument(
+        "--compute_gflops",
+        type=bool,
+        default=False,
+        help="Flag for computing GFLOPS"  
     )
     configs = parser.parse_args()
     return configs, parser
