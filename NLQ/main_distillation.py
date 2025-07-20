@@ -32,6 +32,8 @@ def main(configs, parser):
     feature_map_weight = configs.feature_map_weight
     ce_loss_weight = configs.ce_loss_weight
     weight_highlight_distillation_loss = configs.weight_highlight_distillation_loss
+    # temperature
+    T = 2
 
     # set tensorflow configs
     set_th_config(configs.seed)
@@ -182,24 +184,44 @@ def main(configs, parser):
                     word_ids, char_ids, vfeats, video_mask, query_mask
                 )
 
-                # compute loss
+                # Loss supervision student vs GT (CrossEntropy)
                 loc_loss = student.compute_loss(
                     start_logits_student, end_logits_student, s_labels, e_labels
                 )
-                
+
+                # BCE for highlight (student vs GT)
                 highlight_loss = student.compute_highlight_loss(
                     h_score_student, h_labels, video_mask
                 )
 
-                teacher_start_loss = mse_loss(start_logits_student, start_logits_teacher)
-                teacher_end_loss = mse_loss(end_logits_student, end_logits_teacher)
-                teacher_loss = teacher_start_loss + teacher_end_loss
+                # DISTILLATION START/END
+                highlight_distill_loss = torch.nn.functional.binary_cross_entropy(
+                    h_score_student, h_score_teacher, reduction='none'
+                )
+                video_mask = video_mask.type(torch.float32)
+                highlight_distill_loss = torch.sum(highlight_distill_loss * video_mask) / (torch.sum(video_mask) + 1e-12)
 
-                highlight_distill_loss = mse_loss(h_score_student, h_score_teacher)
+                # === Start / End distillation (softmax / temperature) ===
+                soft_targets_start = torch.softmax(start_logits_teacher / T, dim=-1)
+                log_probs_start = torch.log_softmax(start_logits_student / T, dim=-1)
+                teacher_start_loss = torch.sum(
+                    soft_targets_start * (soft_targets_start.log() - log_probs_start)
+                ) / (start_logits_student.size(0) * (T ** 2))
 
-                total_loss = loc_loss + configs.highlight_lambda * highlight_loss + highlight_distill_loss*weight_highlight_distillation_loss
-                total_loss = feature_map_weight*teacher_loss + ce_loss_weight*total_loss
-                
+                soft_targets_end = torch.softmax(end_logits_teacher / T, dim=-1)
+                log_probs_end = torch.log_softmax(end_logits_student / T, dim=-1)
+                teacher_end_loss = torch.sum(
+                    soft_targets_end * (soft_targets_end.log() - log_probs_end)
+                ) / (end_logits_student.size(0) * (T ** 2))
+
+                teacher_span_loss = teacher_start_loss + teacher_end_loss
+
+                loss_span = feature_map_weight * teacher_span_loss + ce_loss_weight * loc_loss
+                loss_qgh = configs.highlight_lambda * highlight_loss + weight_highlight_distillation_loss * highlight_distill_loss
+
+                total_loss = loss_span + loss_qgh
+
+
                 # compute and apply gradients
                 optimizer.zero_grad()
                 total_loss.backward()
