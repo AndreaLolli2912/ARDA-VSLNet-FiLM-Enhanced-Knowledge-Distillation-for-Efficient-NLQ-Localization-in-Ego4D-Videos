@@ -80,7 +80,7 @@ We attempted post‑training static quantization, but encountered implementation
 
 ## Project Report
 
-A full description of the methodology, experiments and results is provided (here)[https://github.com/AndreaLolli2912/Ego4D-NLQ/blob/main/ARDA_VSLNet__FiLM_Enhanced_Knowledge_Distillation_for_Efficient_Natural_Language_Query_Localization_in_Ego4D_Videos.pdf] ("ARDA VSLNet: FiLM‑Enhanced Knowledge Distillation for Efficient NLQ in Ego4D Videos")
+A full description of the methodology, experiments and results is provided [here](https://github.com/AndreaLolli2912/Ego4D-NLQ/blob/main/ARDA_VSLNet__FiLM_Enhanced_Knowledge_Distillation_for_Efficient_Natural_Language_Query_Localization_in_Ego4D_Videos.pdf) ("ARDA VSLNet: FiLM‑Enhanced Knowledge Distillation for Efficient NLQ in Ego4D Videos")
 
 # References
 
