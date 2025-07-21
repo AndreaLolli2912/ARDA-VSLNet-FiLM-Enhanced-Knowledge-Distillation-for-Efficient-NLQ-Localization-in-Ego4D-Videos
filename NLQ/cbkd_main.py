@@ -216,8 +216,8 @@ def main(configs, parser):
 
             kd_start = kd_kl(stu_s, tch_s)
             kd_end   = kd_kl(stu_e, tch_e)
-            kd_hl    = F.binary_cross_entropy_with_logits(
-                        stu_h, torch.sigmoid(tch_h)
+            kd_hl    = F.binary_cross_entropy(
+                        stu_h, tch_h
             )
             total_loss = (
                 loc_loss +

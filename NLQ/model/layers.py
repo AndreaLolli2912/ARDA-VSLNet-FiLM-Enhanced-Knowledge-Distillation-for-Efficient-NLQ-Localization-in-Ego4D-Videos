@@ -612,7 +612,7 @@ class FiLM(nn.Module):
         self.pooling = pooling
         self.film_generator = nn.Linear(dim, 2 * dim)
 
-    def forward(self, video_feats, query_feats):  
+    def forward(self, video_feats, query_feats):
         """
         video_feats: Tensor of shape [B, L_v, d]
         query_feats: Tensor of shape [B, L_q, d]
