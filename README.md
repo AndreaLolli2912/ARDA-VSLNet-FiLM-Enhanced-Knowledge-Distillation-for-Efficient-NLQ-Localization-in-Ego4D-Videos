@@ -20,7 +20,7 @@ Ego4D-NLQ/
 ```
 
 *(If you are working with v1 annotations, simply replace `v2` with `v1`.)*
-Open the notebook and run all, and the plots will be generated automatically. That’s it — no videos are required for the exploration step.
+Open the notebook and run all, and the plots will be generated automatically.
 
 ## Benchmark: VSLBase & VSLNet with Omnivore and EgoVLP features
 
