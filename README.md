@@ -1,4 +1,4 @@
-﻿# ARDAVSLNet: FiLM-Enhanced Knowledge Distillation for Efficient Natural Language Query Localization in Ego4D Videos
+﻿# ARDA VSLNet: FiLM-Enhanced Knowledge Distillation for Efficient Natural Language Query Localization in Ego4D Videos
 
 Project for "Machine Learning and Deep Learning" 2025/2026 made in collaboration with my colleagues [Di Chiara Rino](https://github.com/RinDiC99), [Famà Daniele](https://github.com/danielefam) and [Fico Alice](https://github.com/AliceFico).
 
